@@ -39,6 +39,7 @@ class ClaudeProcessManager: ObservableObject {
     private var process: Process?
     private var buffer = Data()
     private let queue = DispatchQueue(label: "claude-stream", qos: .userInitiated)
+    private var isStopped = false
 
     func start(message: String, resumeSessionId: String? = nil) {
         // Reset stale events from previous messages
@@ -106,9 +107,9 @@ class ClaudeProcessManager: ObservableObject {
             DispatchQueue.main.async {
                 guard let self = self else { return }
                 if case .error = self.status { return }
-                if proc.terminationStatus == 0 {
+                if self.isStopped || proc.terminationStatus == 0 {
                     self.status = .done
-                    self.onComplete?(self.accumulated)
+                    if !self.isStopped { self.onComplete?(self.accumulated) }
                 } else {
                     self.status = .error("Exit code \(proc.terminationStatus)")
                 }
@@ -258,6 +259,23 @@ class ClaudeProcessManager: ObservableObject {
             return path
         }
         return nil
+    }
+
+    func stop() {
+        isStopped = true
+        if let proc = process {
+            let pid = proc.processIdentifier
+            // Kill child processes (claude may be a child of the zsh wrapper)
+            let pkillTask = Process()
+            pkillTask.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
+            pkillTask.arguments = ["-KILL", "-P", "\(pid)"]
+            pkillTask.standardOutput = FileHandle.nullDevice
+            pkillTask.standardError = FileHandle.nullDevice
+            try? pkillTask.run()
+            // SIGKILL the main process — cannot be caught or ignored
+            kill(pid, SIGKILL)
+        }
+        DispatchQueue.main.async { self.status = .done }
     }
 
     deinit {
@@ -537,6 +555,7 @@ struct ChatView: View {
                 }
 
                 Spacer()
+
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
@@ -599,6 +618,23 @@ struct ChatView: View {
                     viewModel.submitMessage()
                 })
                 .frame(height: textHeight)
+
+                if let manager = viewModel.claudeManager,
+                   manager.status == .waiting || manager.status == .streaming {
+                    Button(action: {
+                        manager.stop()
+                        viewModel.claudeManager = nil
+                    }) {
+                        Image(systemName: "stop.fill")
+                            .font(.system(size: 10))
+                            .foregroundColor(.secondary)
+                            .padding(.horizontal, 4)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.top, 3)
+                    .help("Stop generation")
+                }
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 7)

@@ -158,8 +158,14 @@ class FloatingPanel: NSPanel {
         isTerminalMode = false
     }
 
-    // Handle Escape to close
+    // Handle Escape: stop streaming if active, otherwise close
     override func cancelOperation(_ sender: Any?) {
-        close()
+        if let manager = searchViewModel.claudeManager,
+           manager.status == .waiting || manager.status == .streaming {
+            manager.stop()
+            searchViewModel.claudeManager = nil
+        } else {
+            close()
+        }
     }
 }
