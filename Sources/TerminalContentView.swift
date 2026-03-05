@@ -47,7 +47,6 @@ class ClaudeProcessManager: ObservableObject {
     private var stderrLineCount = 0
     private var nonJSONPreviewCount = 0
     private var runStartedAt: Date?
-    private var cachedImageFlagSupport: Bool?
     private let maxDiagnostics = 80
 
     func start(
@@ -88,12 +87,27 @@ class ClaudeProcessManager: ObservableObject {
             addDiagnostic("Screenshot not requested for this message")
         }
 
-        let effectiveScreenshotURL = normalizedScreenshotURL(
-            screenshotURL,
-            claudePath: claudePath
-        )
-        if effectiveScreenshotURL != nil {
-            addDiagnostic("Image attachment enabled")
+        let effectiveScreenshotURL = normalizedScreenshotURL(screenshotURL)
+
+        // Build stdin JSON payload when image is available (--image flag was removed from claude CLI)
+        var stdinData: Data?
+        if let imageURL = effectiveScreenshotURL,
+           let imageData = try? Data(contentsOf: imageURL) {
+            let base64Image = imageData.base64EncodedString()
+            let messageContent: [[String: Any]] = [
+                ["type": "image", "source": ["type": "base64", "media_type": "image/png", "data": base64Image]],
+                ["type": "text", "text": message]
+            ]
+            let userMessage: [String: Any] = [
+                "type": "user",
+                "message": ["role": "user", "content": messageContent]
+            ]
+            if let jsonData = try? JSONSerialization.data(withJSONObject: userMessage) {
+                stdinData = jsonData + Data("\n".utf8)
+                addDiagnostic("Image attachment: \(imageData.count / 1024) KB → stream-json stdin")
+            } else {
+                addDiagnostic("Image attachment: JSON encoding failed, skipping image")
+            }
         } else if screenshotURL != nil {
             addDiagnostic("Image attachment skipped")
         }
@@ -103,14 +117,31 @@ class ClaudeProcessManager: ObservableObject {
 
         process.executableURL = URL(fileURLWithPath: "/bin/zsh")
         var claudeCmd: String
-        let imageFlag = effectiveScreenshotURL != nil ? "--image \"$HP_SCREENSHOT\" " : ""
-        if let sid = resumeSessionId {
-            claudeCmd = "\(claudePath) --print --resume \(sid) -p \"$HP_MESSAGE\" \(imageFlag)--output-format stream-json --verbose --dangerously-skip-permissions 2>&1"
+        let useStreamJsonInput = stdinData != nil
+        if useStreamJsonInput {
+            if let sid = resumeSessionId {
+                claudeCmd = "\(claudePath) --print --resume \(sid) --input-format stream-json --output-format stream-json --verbose --dangerously-skip-permissions 2>&1"
+            } else {
+                claudeCmd = "\(claudePath) --print --input-format stream-json --output-format stream-json --verbose --dangerously-skip-permissions 2>&1"
+            }
         } else {
-            claudeCmd = "\(claudePath) --print -p \"$HP_MESSAGE\" \(imageFlag)--output-format stream-json --verbose --dangerously-skip-permissions 2>&1"
+            if let sid = resumeSessionId {
+                claudeCmd = "\(claudePath) --print --resume \(sid) -p \"$HP_MESSAGE\" --output-format stream-json --verbose --dangerously-skip-permissions 2>&1"
+            } else {
+                claudeCmd = "\(claudePath) --print -p \"$HP_MESSAGE\" --output-format stream-json --verbose --dangerously-skip-permissions 2>&1"
+            }
         }
         process.arguments = ["-l", "-c", claudeCmd]
-        process.standardInput = FileHandle.nullDevice
+
+        // Set up stdin: pipe for image data, null device for text-only
+        let stdinPipe: Pipe?
+        if stdinData != nil {
+            stdinPipe = Pipe()
+            process.standardInput = stdinPipe
+        } else {
+            stdinPipe = nil
+            process.standardInput = FileHandle.nullDevice
+        }
 
         // Build clean environment
         var env = ProcessInfo.processInfo.environment
@@ -121,9 +152,6 @@ class ClaudeProcessManager: ObservableObject {
         let currentPath = env["PATH"] ?? "/usr/bin:/bin"
         env["PATH"] = (extraPaths + [currentPath]).joined(separator: ":")
         env["HP_MESSAGE"] = message
-        if let screenshotURL = effectiveScreenshotURL {
-            env["HP_SCREENSHOT"] = screenshotURL.path
-        }
         process.environment = env
 
         let stdout = Pipe()
@@ -191,56 +219,31 @@ class ClaudeProcessManager: ObservableObject {
         do {
             try process.run()
             addDiagnostic("Process started (pid: \(process.processIdentifier))")
+            // Write image JSON to stdin after process starts (async to avoid pipe-buffer deadlock)
+            if let pipe = stdinPipe, let data = stdinData {
+                DispatchQueue.global(qos: .userInitiated).async {
+                    pipe.fileHandleForWriting.write(data)
+                    pipe.fileHandleForWriting.closeFile()
+                }
+            }
         } catch {
             status = .error("Failed to launch: \(error.localizedDescription)")
             return
         }
     }
 
-    private func normalizedScreenshotURL(_ screenshotURL: URL?, claudePath: String) -> URL? {
+    private func normalizedScreenshotURL(_ screenshotURL: URL?) -> URL? {
         guard let screenshotURL = screenshotURL else { return nil }
         if FileManager.default.fileExists(atPath: screenshotURL.path),
            let attrs = try? FileManager.default.attributesOfItem(atPath: screenshotURL.path),
            let bytes = attrs[.size] as? NSNumber {
             let kb = max(1, bytes.intValue / 1024)
             addDiagnostic("Screenshot temp file: \(screenshotURL.lastPathComponent) (\(kb) KB)")
+            return screenshotURL
         } else {
             addDiagnostic("Screenshot temp file missing: \(screenshotURL.lastPathComponent)")
-        }
-
-        guard supportsImageFlag(claudePath: claudePath) else {
-            // Avoid leaking temp files when this CLI doesn't support image attachments.
-            try? FileManager.default.removeItem(at: screenshotURL)
-            addDiagnostic("CLI does not support --image; temp file removed")
             return nil
         }
-        return screenshotURL
-    }
-
-    private func supportsImageFlag(claudePath: String) -> Bool {
-        if let cached = cachedImageFlagSupport {
-            return cached
-        }
-        let help = Process()
-        help.executableURL = URL(fileURLWithPath: claudePath)
-        help.arguments = ["--help"]
-        let pipe = Pipe()
-        help.standardOutput = pipe
-        help.standardError = pipe
-        do {
-            try help.run()
-            help.waitUntilExit()
-        } catch {
-            cachedImageFlagSupport = false
-            return false
-        }
-        guard let output = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) else {
-            cachedImageFlagSupport = false
-            return false
-        }
-        let supported = output.contains("--image")
-        cachedImageFlagSupport = supported
-        return supported
     }
 
     private func handleData(_ data: Data) {
