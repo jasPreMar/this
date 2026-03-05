@@ -28,8 +28,12 @@ class FloatingPanel: NSPanel {
         contentView = hostingView
 
         // Wire up the submit callback
-        searchViewModel.onSubmit = { [weak self] context in
-            self?.transitionToTerminal(message: context)
+        searchViewModel.onSubmit = { [weak self] context, screenshotURL, screenshotStatus in
+            self?.transitionToTerminal(
+                message: context,
+                screenshotURL: screenshotURL,
+                screenshotStatus: screenshotStatus
+            )
         }
         searchViewModel.onClose = { [weak self] in
             self?.close()
@@ -94,7 +98,11 @@ class FloatingPanel: NSPanel {
         }
     }
 
-    func transitionToTerminal(message: String) {
+    func transitionToTerminal(
+        message: String,
+        screenshotURL: URL? = nil,
+        screenshotStatus: String? = nil
+    ) {
         isTerminalMode = true
         removeAllMonitors()
 
@@ -111,12 +119,15 @@ class FloatingPanel: NSPanel {
             if let sid = manager.sessionId {
                 self?.searchViewModel.currentSessionId = sid
             }
-            self?.searchViewModel.claudeManager = nil
         }
         searchViewModel.claudeManager = manager
         searchViewModel.isChatMode = true
 
-        manager.start(message: message)
+        manager.start(
+            message: message,
+            screenshotURL: screenshotURL,
+            screenshotDebug: screenshotStatus
+        )
     }
 
     private func positionAtCursor() {
@@ -163,7 +174,6 @@ class FloatingPanel: NSPanel {
         if let manager = searchViewModel.claudeManager,
            manager.status == .waiting || manager.status == .streaming {
             manager.stop()
-            searchViewModel.claudeManager = nil
         } else {
             close()
         }

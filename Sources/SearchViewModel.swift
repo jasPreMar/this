@@ -10,10 +10,12 @@ class SearchViewModel: ObservableObject {
     @Published var isChatMode = false
     @Published var claudeManager: ClaudeProcessManager?
     @Published var chatHistory: [(role: String, text: String)] = []
+    @Published var lastScreenshotStatus: String = ""
     var currentSessionId: String?
+    private var hoveredAppPID: pid_t = 0
 
     /// Set by FloatingPanel
-    var onSubmit: ((String) -> Void)?
+    var onSubmit: ((String, URL?, String) -> Void)?
     var onClose: (() -> Void)?
 
     func submitMessage() {
@@ -39,7 +41,9 @@ class SearchViewModel: ObservableObject {
         } else {
             // First message — switch to chat mode
             let context = buildContextMessage()
-            onSubmit?(context)
+            let (screenshotURL, screenshotStatus) = captureHoveredWindowScreenshot()
+            lastScreenshotStatus = screenshotStatus
+            onSubmit?(context, screenshotURL, screenshotStatus)
         }
     }
 
@@ -82,6 +86,59 @@ class SearchViewModel: ObservableObject {
         return lines.joined(separator: "\n")
     }
 
+    func captureHoveredWindowScreenshot() -> (URL?, String) {
+        guard hoveredAppPID != 0 else {
+            return (nil, "Screenshot not captured: no hovered app")
+        }
+
+        guard CGPreflightScreenCaptureAccess() else {
+            CGRequestScreenCaptureAccess()
+            return (nil, "Screenshot not captured: screen recording permission not granted")
+        }
+
+        guard let windowList = CGWindowListCopyWindowInfo(
+            [.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID
+        ) as? [[String: Any]] else {
+            return (nil, "Screenshot not captured: failed to enumerate windows")
+        }
+
+        let appWindows = windowList.filter {
+            ($0[kCGWindowOwnerPID as String] as? pid_t) == hoveredAppPID
+        }
+
+        let sortedWindows = appWindows.sorted {
+            ($0[kCGWindowLayer as String] as? Int ?? 999) < ($1[kCGWindowLayer as String] as? Int ?? 999)
+        }
+
+        guard let topWindow = sortedWindows.first,
+              let windowID = topWindow[kCGWindowNumber as String] as? CGWindowID else {
+            return (nil, "Screenshot not captured: no visible window for hovered app")
+        }
+
+        guard let cgImage = CGWindowListCreateImage(
+            .null, .optionIncludingWindow, windowID, [.boundsIgnoreFraming]
+        ) else {
+            return (nil, "Screenshot not captured: CGWindowListCreateImage failed")
+        }
+
+        let nsImage = NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
+        guard let tiffData = nsImage.tiffRepresentation,
+              let bitmapRep = NSBitmapImageRep(data: tiffData),
+              let pngData = bitmapRep.representation(using: .png, properties: [:]) else {
+            return (nil, "Screenshot not captured: failed to encode PNG data")
+        }
+
+        let tempURL = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("hp_screenshot_\(UUID().uuidString).png")
+        do {
+            try pngData.write(to: tempURL)
+            let kb = max(1, pngData.count / 1024)
+            return (tempURL, "Screenshot captured: \(cgImage.width)x\(cgImage.height), \(kb) KB")
+        } catch {
+            return (nil, "Screenshot not captured: failed to write temp file (\(error.localizedDescription))")
+        }
+    }
+
     func updateHoveredApp() {
         let mouseLocation = NSEvent.mouseLocation
         guard let screen = NSScreen.main else { return }
@@ -95,6 +152,13 @@ class SearchViewModel: ObservableObject {
         guard result == .success, let element = element else {
             hoveredApp = ""
             return
+        }
+
+        // Store the PID of the hovered app for screenshot use
+        var pid: pid_t = 0
+        AXUIElementGetPid(element, &pid)
+        if let app = NSRunningApplication(processIdentifier: pid), app.localizedName != "HyperPointer" {
+            hoveredAppPID = pid
         }
 
         // Build a description from the element hierarchy
