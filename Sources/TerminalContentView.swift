@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 import Combine
+import MarkdownUI
 
 // MARK: - Stream Event Models
 
@@ -715,6 +716,64 @@ struct PanelContentView: View {
     }
 }
 
+// MARK: - Markdown message renderer
+
+private extension Theme {
+    static let assistant = Theme()
+        .text {
+            ForegroundColor(.primary)
+            FontSize(13)
+        }
+        .strong {
+            FontWeight(.semibold)
+        }
+        .emphasis {
+            FontStyle(.italic)
+        }
+        .code {
+            FontFamilyVariant(.monospaced)
+            FontSize(.em(0.9))
+        }
+        .heading1 { configuration in
+            configuration.label.markdownTextStyle {
+                FontWeight(.bold)
+                FontSize(.em(1.1))
+            }
+        }
+        .heading2 { configuration in
+            configuration.label.markdownTextStyle {
+                FontWeight(.semibold)
+                FontSize(.em(1.05))
+            }
+        }
+        .heading3 { configuration in
+            configuration.label.markdownTextStyle {
+                FontWeight(.semibold)
+            }
+        }
+        .codeBlock { configuration in
+            configuration.label
+                .relativeLineSpacing(.em(0.25))
+                .markdownTextStyle {
+                    FontFamilyVariant(.monospaced)
+                    FontSize(.em(0.9))
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 6)
+                .background(Color.primary.opacity(0.06))
+                .cornerRadius(6)
+        }
+}
+
+private struct AssistantMarkdown: View {
+    let text: String
+    var body: some View {
+        Markdown(text)
+            .markdownTheme(.assistant)
+            .textSelection(.enabled)
+    }
+}
+
 // MARK: - Chat View (output + input in the floating panel)
 
 struct ChatView: View {
@@ -754,9 +813,7 @@ struct ChatView: View {
                                     .font(.system(size: 12, design: .monospaced))
                                     .foregroundColor(.secondary)
                             } else {
-                                Text(entry.text)
-                                    .font(.system(size: 13))
-                                    .textSelection(.enabled)
+                                AssistantMarkdown(text: entry.text)
                             }
                         }
 
@@ -780,9 +837,7 @@ struct ChatView: View {
                         if let manager = viewModel.claudeManager,
                            !manager.outputText.isEmpty,
                            manager.status == .done {
-                            Text(manager.outputText)
-                                .font(.system(size: 13))
-                                .textSelection(.enabled)
+                            AssistantMarkdown(text: manager.outputText)
                         }
 
                         Spacer().frame(height: 0).id("bottom")
