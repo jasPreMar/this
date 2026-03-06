@@ -117,7 +117,47 @@ class SearchViewModel: ObservableObject {
                 return (nil, "Screenshot not captured: no visible window for hovered app")
             }
 
-            cgImage = CGWindowListCreateImage(.null, .optionIncludingWindow, windowID, [.boundsIgnoreFraming])
+            // Extract bounds of the topmost window.
+            var windowRect = CGRect.zero
+            if let boundsDict = topWindow[kCGWindowBounds as String] as? NSDictionary {
+                CGRectMakeWithDictionaryRepresentation(boundsDict as CFDictionary, &windowRect)
+            }
+
+            let isBrowser = NSRunningApplication(processIdentifier: hoveredAppPID)
+                .flatMap { $0.bundleIdentifier }
+                .map { browserBundleIDs.contains($0) } ?? false
+
+            // Full-screen detection: check the LARGEST window of the app, not just the topmost
+            // layer one. In full screen mode the topmost window is often just a tiny title bar
+            // strip while the actual content occupies the display in a separate layer window.
+            let largestRect: CGRect = appWindows.reduce(.zero) { best, win in
+                var r = CGRect.zero
+                if let d = win[kCGWindowBounds as String] as? NSDictionary {
+                    CGRectMakeWithDictionaryRepresentation(d as CFDictionary, &r)
+                }
+                return r.width * r.height > best.width * best.height ? r : best
+            }
+            let isFullScreen = NSScreen.screens.contains { screen in
+                largestRect.width >= screen.frame.width * 0.95 &&
+                largestRect.height >= screen.frame.height * 0.95
+            }
+
+            if isFullScreen {
+                // Capture the full display under the mouse cursor using CG display coordinates.
+                let mouse = NSEvent.mouseLocation
+                let mainH = NSScreen.screens[0].frame.height
+                let cgMouse = CGPoint(x: mouse.x, y: mainH - mouse.y)
+                var displayID = CGMainDisplayID()
+                var count: UInt32 = 0
+                CGGetDisplaysWithPoint(cgMouse, 1, &displayID, &count)
+                cgImage = CGWindowListCreateImage(
+                    CGDisplayBounds(displayID), .optionOnScreenOnly, kCGNullWindowID, []
+                )
+            } else if isBrowser && !windowRect.isEmpty {
+                cgImage = CGWindowListCreateImage(windowRect, .optionOnScreenOnly, kCGNullWindowID, [])
+            } else {
+                cgImage = CGWindowListCreateImage(.null, .optionIncludingWindow, windowID, [.boundsIgnoreFraming])
+            }
         }
 
         guard let cgImage = cgImage else {
