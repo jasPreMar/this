@@ -118,17 +118,18 @@ class ClaudeProcessManager: ObservableObject {
         process.executableURL = URL(fileURLWithPath: "/bin/zsh")
         var claudeCmd: String
         let useStreamJsonInput = stdinData != nil
+        let systemPromptFlag = "--system-prompt \"$HP_SYSTEM\""
         if useStreamJsonInput {
             if let sid = resumeSessionId {
-                claudeCmd = "\(claudePath) --print --resume \(sid) --input-format stream-json --output-format stream-json --verbose --dangerously-skip-permissions 2>&1"
+                claudeCmd = "\(claudePath) --print --resume \(sid) \(systemPromptFlag) --input-format stream-json --output-format stream-json --verbose --dangerously-skip-permissions 2>&1"
             } else {
-                claudeCmd = "\(claudePath) --print --input-format stream-json --output-format stream-json --verbose --dangerously-skip-permissions 2>&1"
+                claudeCmd = "\(claudePath) --print \(systemPromptFlag) --input-format stream-json --output-format stream-json --verbose --dangerously-skip-permissions 2>&1"
             }
         } else {
             if let sid = resumeSessionId {
-                claudeCmd = "\(claudePath) --print --resume \(sid) -p \"$HP_MESSAGE\" --output-format stream-json --verbose --dangerously-skip-permissions 2>&1"
+                claudeCmd = "\(claudePath) --print --resume \(sid) \(systemPromptFlag) -p \"$HP_MESSAGE\" --output-format stream-json --verbose --dangerously-skip-permissions 2>&1"
             } else {
-                claudeCmd = "\(claudePath) --print -p \"$HP_MESSAGE\" --output-format stream-json --verbose --dangerously-skip-permissions 2>&1"
+                claudeCmd = "\(claudePath) --print \(systemPromptFlag) -p \"$HP_MESSAGE\" --output-format stream-json --verbose --dangerously-skip-permissions 2>&1"
             }
         }
         process.arguments = ["-l", "-c", claudeCmd]
@@ -152,6 +153,13 @@ class ClaudeProcessManager: ObservableObject {
         let currentPath = env["PATH"] ?? "/usr/bin:/bin"
         env["PATH"] = (extraPaths + [currentPath]).joined(separator: ":")
         env["HP_MESSAGE"] = message
+        env["HP_SYSTEM"] = """
+            You are HyperPointer, an AI assistant embedded in macOS. You have full access to the \
+            Mac: open apps (open -a "AppName"), run AppleScript via osascript, automate the UI, \
+            manage files, browse the web, run shell commands, and more. When asked to open an app, \
+            click a button, type text, or do anything on the Mac, do it directly — never say you \
+            cannot control the GUI. Use bash and osascript freely.
+            """
         process.environment = env
 
         let stdout = Pipe()
