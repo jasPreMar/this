@@ -2,6 +2,14 @@ import AppKit
 import SwiftUI
 
 class FloatingPanel: NSPanel {
+    private struct FocusRestorationState {
+        weak var app: NSRunningApplication?
+        let bundleIdentifier: String?
+        let processIdentifier: pid_t
+        let focusedWindow: AXUIElement?
+        let focusedElement: AXUIElement?
+    }
+
     let searchViewModel = SearchViewModel()
     private var globalMouseMonitor: Any?
     private var localMouseMonitor: Any?
@@ -10,6 +18,8 @@ class FloatingPanel: NSPanel {
     private var hostingView: NSHostingView<PanelContentView>!
     private var isTerminalMode = false
     private var isCommandKeyVisible = false
+    private var focusRestorationState: FocusRestorationState?
+    private var shouldRestoreFocusOnClose = true
     var isCommandKeyHeld = false
 
     init() {
@@ -66,13 +76,14 @@ class FloatingPanel: NSPanel {
             setFrameOrigin(NSPoint(x: x, y: y))
         }
 
+        prepareForTextInputFocus()
         makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
 
         // Dismiss on click outside (no mouse-move monitors — panel stays anchored)
         globalClickMonitor = NSEvent.addGlobalMonitorForEvents(matching: .leftMouseDown) { [weak self] _ in
             guard let self = self, !self.isTerminalMode else { return }
-            self.close()
+            self.dismiss(restorePreviousFocus: false)
         }
     }
 
@@ -80,6 +91,7 @@ class FloatingPanel: NSPanel {
         searchViewModel.query = ""
 
         positionAtCursor()
+        prepareForTextInputFocus()
         makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
 
@@ -97,7 +109,7 @@ class FloatingPanel: NSPanel {
         // Dismiss on any click outside
         globalClickMonitor = NSEvent.addGlobalMonitorForEvents(matching: .leftMouseDown) { [weak self] _ in
             guard let self = self, !self.isTerminalMode else { return }
-            self.close()
+            self.dismiss(restorePreviousFocus: false)
         }
     }
 
@@ -186,13 +198,14 @@ class FloatingPanel: NSPanel {
         if let m = localMouseMonitor { NSEvent.removeMonitor(m); localMouseMonitor = nil }
 
         guard isCommandKeyVisible else {
-            close()
+            dismiss(restorePreviousFocus: false)
             return
         }
 
         // Show input row if it was hidden
         if searchViewModel.isCommandKeyMode {
             searchViewModel.isCommandKeyMode = false
+            prepareForTextInputFocus()
             makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
         }
@@ -200,11 +213,11 @@ class FloatingPanel: NSPanel {
         // Dismiss when cursor moves (unless ⌘ is held again or a message was sent)
         globalMouseMonitor = NSEvent.addGlobalMonitorForEvents(matching: .mouseMoved) { [weak self] _ in
             guard let self, !self.isCommandKeyHeld, !self.searchViewModel.isChatMode else { return }
-            self.close()
+            self.dismiss()
         }
         localMouseMonitor = NSEvent.addLocalMonitorForEvents(matching: .mouseMoved) { [weak self] event in
             guard let self, !self.isCommandKeyHeld, !self.searchViewModel.isChatMode else { return event }
-            self.close()
+            self.dismiss()
             return event
         }
     }
@@ -246,6 +259,11 @@ class FloatingPanel: NSPanel {
     }
 
     override func close() {
+        let shouldRestoreFocus = shouldRestoreFocusOnClose
+        let restorationState = focusRestorationState
+        shouldRestoreFocusOnClose = true
+        focusRestorationState = nil
+
         removeAllMonitors()
         super.close()
         searchViewModel.query = ""
@@ -258,6 +276,10 @@ class FloatingPanel: NSPanel {
         isTerminalMode = false
         isCommandKeyVisible = false
         isCommandKeyHeld = false
+
+        if shouldRestoreFocus {
+            restoreFocus(using: restorationState)
+        }
     }
 
     // Handle Escape: stop streaming if active, otherwise close
@@ -268,5 +290,70 @@ class FloatingPanel: NSPanel {
         } else {
             close()
         }
+    }
+
+    func dismiss(restorePreviousFocus: Bool = true) {
+        shouldRestoreFocusOnClose = restorePreviousFocus
+        close()
+    }
+
+    private func prepareForTextInputFocus() {
+        guard focusRestorationState == nil,
+              let app = NSWorkspace.shared.frontmostApplication,
+              app.processIdentifier != ProcessInfo.processInfo.processIdentifier else { return }
+
+        let appElement = AXUIElementCreateApplication(app.processIdentifier)
+        let focusedWindow = axElementValue(appElement, key: kAXFocusedWindowAttribute)
+        let focusedElement = axElementValue(appElement, key: kAXFocusedUIElementAttribute)
+
+        focusRestorationState = FocusRestorationState(
+            app: app,
+            bundleIdentifier: app.bundleIdentifier,
+            processIdentifier: app.processIdentifier,
+            focusedWindow: focusedWindow,
+            focusedElement: focusedElement
+        )
+    }
+
+    private func restoreFocus(using state: FocusRestorationState?) {
+        guard let state, let app = runningApplication(for: state) else { return }
+
+        app.activate(options: [.activateAllWindows])
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+            if let window = state.focusedWindow {
+                _ = AXUIElementPerformAction(window, kAXRaiseAction as CFString)
+                _ = AXUIElementSetAttributeValue(window, kAXMainAttribute as CFString, kCFBooleanTrue)
+            }
+
+            if let element = state.focusedElement {
+                _ = AXUIElementSetAttributeValue(element, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+            }
+        }
+    }
+
+    private func runningApplication(for state: FocusRestorationState) -> NSRunningApplication? {
+        if let app = state.app, !app.isTerminated {
+            return app
+        }
+
+        if let bundleIdentifier = state.bundleIdentifier {
+            return NSRunningApplication.runningApplications(withBundleIdentifier: bundleIdentifier)
+                .first(where: { !$0.isTerminated })
+        }
+
+        return NSRunningApplication(processIdentifier: state.processIdentifier)
+    }
+
+    private func axValue(_ element: AXUIElement, key: String) -> AnyObject? {
+        var value: AnyObject?
+        let result = AXUIElementCopyAttributeValue(element, key as CFString, &value)
+        guard result == .success else { return nil }
+        return value
+    }
+
+    private func axElementValue(_ element: AXUIElement, key: String) -> AXUIElement? {
+        guard let value = axValue(element, key: key) else { return nil }
+        return unsafeBitCast(value, to: AXUIElement.self)
     }
 }
