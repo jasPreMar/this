@@ -87,37 +87,40 @@ class SearchViewModel: ObservableObject {
     }
 
     func captureHoveredWindowScreenshot() -> (URL?, String) {
-        guard hoveredAppPID != 0 else {
-            return (nil, "Screenshot not captured: no hovered app")
-        }
-
         guard CGPreflightScreenCaptureAccess() else {
             CGRequestScreenCaptureAccess()
             return (nil, "Screenshot not captured: screen recording permission not granted")
         }
 
-        guard let windowList = CGWindowListCopyWindowInfo(
-            [.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID
-        ) as? [[String: Any]] else {
-            return (nil, "Screenshot not captured: failed to enumerate windows")
+        let cgImage: CGImage?
+
+        if hoveredAppPID == 0 {
+            // No hovered element — capture the entire screen
+            cgImage = CGWindowListCreateImage(.infinite, .optionOnScreenOnly, kCGNullWindowID, [])
+        } else {
+            guard let windowList = CGWindowListCopyWindowInfo(
+                [.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID
+            ) as? [[String: Any]] else {
+                return (nil, "Screenshot not captured: failed to enumerate windows")
+            }
+
+            let appWindows = windowList.filter {
+                ($0[kCGWindowOwnerPID as String] as? pid_t) == hoveredAppPID
+            }
+
+            let sortedWindows = appWindows.sorted {
+                ($0[kCGWindowLayer as String] as? Int ?? 999) < ($1[kCGWindowLayer as String] as? Int ?? 999)
+            }
+
+            guard let topWindow = sortedWindows.first,
+                  let windowID = topWindow[kCGWindowNumber as String] as? CGWindowID else {
+                return (nil, "Screenshot not captured: no visible window for hovered app")
+            }
+
+            cgImage = CGWindowListCreateImage(.null, .optionIncludingWindow, windowID, [.boundsIgnoreFraming])
         }
 
-        let appWindows = windowList.filter {
-            ($0[kCGWindowOwnerPID as String] as? pid_t) == hoveredAppPID
-        }
-
-        let sortedWindows = appWindows.sorted {
-            ($0[kCGWindowLayer as String] as? Int ?? 999) < ($1[kCGWindowLayer as String] as? Int ?? 999)
-        }
-
-        guard let topWindow = sortedWindows.first,
-              let windowID = topWindow[kCGWindowNumber as String] as? CGWindowID else {
-            return (nil, "Screenshot not captured: no visible window for hovered app")
-        }
-
-        guard let cgImage = CGWindowListCreateImage(
-            .null, .optionIncludingWindow, windowID, [.boundsIgnoreFraming]
-        ) else {
+        guard let cgImage = cgImage else {
             return (nil, "Screenshot not captured: CGWindowListCreateImage failed")
         }
 
