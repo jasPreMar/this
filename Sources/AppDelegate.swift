@@ -24,6 +24,11 @@ private func rightClickCallback(
         return Unmanaged.passRetained(event)
     }
 
+    // Only activate on Command + right click; let plain right clicks through
+    guard event.flags.contains(.maskCommand) else {
+        return Unmanaged.passRetained(event)
+    }
+
     // Convert CG coordinates (top-left origin) to NS coordinates (bottom-left origin)
     let cgLocation = event.location
     if let screen = NSScreen.main {
