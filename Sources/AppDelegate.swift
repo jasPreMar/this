@@ -209,7 +209,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func createNewPanel(at point: NSPoint) {
         // Close any existing search-mode panels (no message sent yet)
         for panel in panels where panel.isVisible && !panel.searchViewModel.isChatMode {
-            panel.close()
+            panel.dismiss(restorePreviousFocus: false)
         }
         panels.removeAll { !$0.isVisible }
 
