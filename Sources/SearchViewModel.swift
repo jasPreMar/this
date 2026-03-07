@@ -3,6 +3,13 @@ import Combine
 import CoreGraphics
 
 class SearchViewModel: ObservableObject {
+    enum VoiceState: Equatable {
+        case idle
+        case listening
+        case transcribing
+        case failed(String)
+    }
+
     @Published var query: String = ""
     @Published var hoveredApp: String = ""
     @Published var hoveredParts: [String] = []
@@ -14,6 +21,8 @@ class SearchViewModel: ObservableObject {
     @Published var claudeManager: ClaudeProcessManager?
     @Published var chatHistory: [(role: String, text: String)] = []
     @Published var lastScreenshotStatus: String = ""
+    @Published var voiceState: VoiceState = .idle
+    @Published var voiceLevel: CGFloat = 0
     var currentSessionId: String?
     var onContentSizeChange: ((CGSize) -> Void)?
     private var hoveredAppPID: pid_t = 0
@@ -21,6 +30,15 @@ class SearchViewModel: ObservableObject {
     /// Set by FloatingPanel
     var onSubmit: ((String, URL?, String) -> Void)?
     var onClose: (() -> Void)?
+
+    var isVoiceModeActive: Bool {
+        switch voiceState {
+        case .idle:
+            return false
+        case .listening, .transcribing, .failed:
+            return true
+        }
+    }
 
     func submitMessage() {
         let message = query.trimmingCharacters(in: .whitespacesAndNewlines)

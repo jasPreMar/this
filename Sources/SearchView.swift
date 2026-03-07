@@ -47,7 +47,7 @@ struct SearchView: View {
                         .padding(.horizontal, 8)
                 }
 
-                if !viewModel.isCommandKeyMode {
+                if !viewModel.isCommandKeyMode && !viewModel.isVoiceModeActive {
                     PanelInputRow(
                         viewModel: viewModel,
                         textWidth: $textWidth,
@@ -144,9 +144,26 @@ struct PanelHeaderSection<Accessory: View>: View {
                         text: visiblePart,
                         appIcon: viewModel.hoveredContextIcon,
                         contextText: viewModel.hoveredParts.first,
+                        voiceState: viewModel.voiceState,
+                        voiceLevel: viewModel.voiceLevel,
                         showsCloseButtonOnHover: showsCloseButtonOnHover,
                         onClose: onClose
                     )
+
+                    Spacer(minLength: 8)
+                    accessory
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 7)
+            } else if viewModel.isVoiceModeActive {
+                HStack(spacing: 8) {
+                    Image(systemName: "mic.fill")
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                        .frame(width: 16, alignment: .center)
+
+                    VoiceStatusView(state: viewModel.voiceState, level: viewModel.voiceLevel)
 
                     Spacer(minLength: 8)
                     accessory
@@ -323,6 +340,8 @@ struct ContextSummaryView: View {
     let text: String
     let appIcon: NSImage?
     let contextText: String?
+    let voiceState: SearchViewModel.VoiceState
+    let voiceLevel: CGFloat
     let showsCloseButtonOnHover: Bool
     let onClose: (() -> Void)?
     @State private var isHovered = false
@@ -332,11 +351,15 @@ struct ContextSummaryView: View {
             leadingIcon
                 .frame(width: 16, height: 16, alignment: .center)
 
-            Text(displayText(text))
-                .font(.system(size: 13))
-                .lineLimit(1)
-                .truncationMode(.tail)
-                .foregroundColor(.primary)
+            if voiceState == .idle {
+                Text(displayText(text))
+                    .font(.system(size: 13))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .foregroundColor(.primary)
+            } else {
+                VoiceStatusView(state: voiceState, level: voiceLevel)
+            }
         }
         .onHover { isHovered = $0 }
     }
@@ -416,8 +439,59 @@ struct ContextSummaryView: View {
     }
 }
 
+struct VoiceStatusView: View {
+    let state: SearchViewModel.VoiceState
+    let level: CGFloat
+
+    var body: some View {
+        switch state {
+        case .idle:
+            EmptyView()
+        case .listening:
+            HStack(spacing: 8) {
+                VoiceWaveformView(level: level)
+                Text("Release Shift to send")
+                    .font(.system(size: 12))
+                    .foregroundColor(.secondary)
+            }
+        case .transcribing:
+            Text("Transcribing...")
+                .font(.system(size: 12))
+                .foregroundColor(.secondary)
+        case .failed(let message):
+            Text(message)
+                .font(.system(size: 12))
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .foregroundColor(.secondary)
+        }
+    }
+}
+
+struct VoiceWaveformView: View {
+    let level: CGFloat
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 0.08)) { timeline in
+            let time = timeline.date.timeIntervalSinceReferenceDate
+
+            HStack(alignment: .center, spacing: 3) {
+                ForEach(0..<6, id: \.self) { index in
+                    let phase = abs(sin(time * 6 + Double(index) * 0.65))
+                    let amplitude = max(0.18, min(1, level * (0.75 + (phase * 0.75))))
+
+                    RoundedRectangle(cornerRadius: 1.5)
+                        .fill(Color.accentColor.opacity(0.95))
+                        .frame(width: 3, height: 5 + (amplitude * 14))
+                }
+            }
+            .frame(height: 20, alignment: .center)
+        }
+    }
+}
+
 private extension SearchViewModel {
     var hasPanelHeaderContent: Bool {
-        !selectedText.isEmpty || hoveredParts.last != nil
+        !selectedText.isEmpty || hoveredParts.last != nil || isVoiceModeActive
     }
 }

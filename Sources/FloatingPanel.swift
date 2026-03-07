@@ -15,12 +15,17 @@ class FloatingPanel: NSPanel {
     private var localMouseMonitor: Any?
     private var globalClickMonitor: Any?
     private var commandKeyMouseMonitor: Any?
+    private var globalFlagsMonitor: Any?
+    private var localFlagsMonitor: Any?
     private var hostingView: NSHostingView<PanelContentView>!
     private var isTerminalMode = false
     private var isCommandKeyVisible = false
+    private var isCursorFollowing = false
+    private var isShiftHeld = false
     private var lastReportedContentSize: CGSize = .zero
     private var focusRestorationState: FocusRestorationState?
     private var shouldRestoreFocusOnClose = true
+    private let voiceController = VoiceDictationController()
     var isCommandKeyHeld = false
 
     init() {
@@ -55,6 +60,17 @@ class FloatingPanel: NSPanel {
         searchViewModel.onContentSizeChange = { [weak self] size in
             self?.resizeToContentSize(size, preserveTopEdge: true)
         }
+        voiceController.onStateChange = { [weak self] state in
+            self?.handleVoiceStateChange(state)
+        }
+        voiceController.onLevelChange = { [weak self] level in
+            self?.searchViewModel.voiceLevel = level
+        }
+        voiceController.onTranscript = { [weak self] transcript in
+            guard let self else { return }
+            self.searchViewModel.query = transcript
+            self.searchViewModel.submitMessage()
+        }
     }
 
     override var canBecomeKey: Bool { true }
@@ -63,6 +79,8 @@ class FloatingPanel: NSPanel {
     func show(at point: NSPoint) {
         searchViewModel.query = ""
         searchViewModel.updateHoveredApp()
+        installFlagsMonitors()
+        isCursorFollowing = false
 
         let fittingSize = hostingView.fittingSize
         setContentSize(fittingSize)
@@ -93,6 +111,8 @@ class FloatingPanel: NSPanel {
 
     func show() {
         searchViewModel.query = ""
+        installFlagsMonitors()
+        isCursorFollowing = true
 
         positionAtCursor()
         prepareForTextInputFocus()
@@ -123,6 +143,7 @@ class FloatingPanel: NSPanel {
         screenshotStatus: String? = nil
     ) {
         isTerminalMode = true
+        isCursorFollowing = false
         removeAllMonitors()
 
         // Switch to chat mode — the PanelContentView handles the rest
@@ -150,7 +171,7 @@ class FloatingPanel: NSPanel {
     }
 
     private func positionAtCursor() {
-        guard !isTerminalMode else { return }
+        guard !isTerminalMode, !searchViewModel.isVoiceModeActive else { return }
         let fittingSize = hostingView.fittingSize
         setContentSize(fittingSize)
 
@@ -202,10 +223,12 @@ class FloatingPanel: NSPanel {
     /// Called when ⌘ is pressed. Shows a minimal icon indicator immediately,
     /// then expands to the full panel on the first cursor move.
     func startCommandKeyMode() {
+        installFlagsMonitors()
         searchViewModel.isCommandKeyMode = true
         searchViewModel.isMinimalMode = true
         searchViewModel.query = ""
         isCommandKeyVisible = false
+        isCursorFollowing = true
 
         // Show the indicator right away at the current cursor position
         searchViewModel.updateHoveredApp()
@@ -229,6 +252,13 @@ class FloatingPanel: NSPanel {
         if let m = commandKeyMouseMonitor { NSEvent.removeMonitor(m); commandKeyMouseMonitor = nil }
         if let m = globalMouseMonitor { NSEvent.removeMonitor(m); globalMouseMonitor = nil }
         if let m = localMouseMonitor { NSEvent.removeMonitor(m); localMouseMonitor = nil }
+        isCursorFollowing = false
+
+        if searchViewModel.isVoiceModeActive {
+            searchViewModel.isCommandKeyMode = false
+            searchViewModel.isMinimalMode = false
+            return
+        }
 
         guard isCommandKeyVisible else {
             dismiss(restorePreviousFocus: false)
@@ -262,7 +292,9 @@ class FloatingPanel: NSPanel {
         if let m = localMouseMonitor { NSEvent.removeMonitor(m); localMouseMonitor = nil }
         if let m = commandKeyMouseMonitor { NSEvent.removeMonitor(m); commandKeyMouseMonitor = nil }
 
+        installFlagsMonitors()
         isCommandKeyVisible = true
+        isCursorFollowing = true
         if searchViewModel.query.isEmpty {
             searchViewModel.isCommandKeyMode = true
         }
@@ -282,13 +314,22 @@ class FloatingPanel: NSPanel {
     }
 
     private func removeAllMonitors() {
-        for monitor in [globalMouseMonitor, localMouseMonitor, globalClickMonitor, commandKeyMouseMonitor].compactMap({ $0 }) {
+        for monitor in [
+            globalMouseMonitor,
+            localMouseMonitor,
+            globalClickMonitor,
+            commandKeyMouseMonitor,
+            globalFlagsMonitor,
+            localFlagsMonitor
+        ].compactMap({ $0 }) {
             NSEvent.removeMonitor(monitor)
         }
         globalMouseMonitor = nil
         localMouseMonitor = nil
         globalClickMonitor = nil
         commandKeyMouseMonitor = nil
+        globalFlagsMonitor = nil
+        localFlagsMonitor = nil
     }
 
     override func close() {
@@ -298,18 +339,23 @@ class FloatingPanel: NSPanel {
         focusRestorationState = nil
 
         removeAllMonitors()
+        voiceController.cancel()
         super.close()
         searchViewModel.query = ""
         searchViewModel.isChatMode = false
         searchViewModel.isCommandKeyMode = false
         searchViewModel.isMinimalMode = false
+        searchViewModel.voiceState = .idle
+        searchViewModel.voiceLevel = 0
         searchViewModel.chatHistory = []
         searchViewModel.claudeManager = nil
         searchViewModel.currentSessionId = nil
         lastReportedContentSize = .zero
         isTerminalMode = false
         isCommandKeyVisible = false
+        isCursorFollowing = false
         isCommandKeyHeld = false
+        isShiftHeld = false
 
         if shouldRestoreFocus {
             restoreFocus(using: restorationState)
@@ -329,6 +375,86 @@ class FloatingPanel: NSPanel {
     func dismiss(restorePreviousFocus: Bool = true) {
         shouldRestoreFocusOnClose = restorePreviousFocus
         close()
+    }
+
+    private func installFlagsMonitors() {
+        if globalFlagsMonitor == nil {
+            globalFlagsMonitor = NSEvent.addGlobalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
+                self?.handleFlagsChanged(event)
+            }
+        }
+        if localFlagsMonitor == nil {
+            localFlagsMonitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
+                self?.handleFlagsChanged(event)
+                return event
+            }
+        }
+    }
+
+    private func handleFlagsChanged(_ event: NSEvent) {
+        let shiftDown = event.modifierFlags.contains(.shift)
+
+        if shiftDown && !isShiftHeld {
+            isShiftHeld = true
+            startVoiceModeIfNeeded()
+        } else if !shiftDown && isShiftHeld {
+            isShiftHeld = false
+            stopVoiceModeIfNeeded()
+        }
+    }
+
+    private func startVoiceModeIfNeeded() {
+        guard isVisible,
+              !isTerminalMode,
+              !searchViewModel.isChatMode,
+              !searchViewModel.isMinimalMode,
+              isCursorFollowing,
+              !searchViewModel.isVoiceModeActive else { return }
+
+        if let monitor = globalMouseMonitor {
+            NSEvent.removeMonitor(monitor)
+            globalMouseMonitor = nil
+        }
+        if let monitor = localMouseMonitor {
+            NSEvent.removeMonitor(monitor)
+            localMouseMonitor = nil
+        }
+        if let monitor = commandKeyMouseMonitor {
+            NSEvent.removeMonitor(monitor)
+            commandKeyMouseMonitor = nil
+        }
+
+        isCursorFollowing = false
+        searchViewModel.isCommandKeyMode = false
+        searchViewModel.isMinimalMode = false
+        voiceController.start()
+    }
+
+    private func stopVoiceModeIfNeeded() {
+        if searchViewModel.voiceState == .listening {
+            voiceController.stop()
+        }
+    }
+
+    private func handleVoiceStateChange(_ state: VoiceDictationController.State) {
+        switch state {
+        case .idle:
+            searchViewModel.voiceState = .idle
+            searchViewModel.voiceLevel = 0
+        case .listening:
+            searchViewModel.voiceState = .listening
+        case .transcribing:
+            searchViewModel.voiceState = .transcribing
+            searchViewModel.voiceLevel = 0
+        case .failed(let message):
+            searchViewModel.voiceState = .failed(message)
+            searchViewModel.voiceLevel = 0
+
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+                guard let self, self.searchViewModel.voiceState == .failed(message) else { return }
+                self.searchViewModel.voiceState = .idle
+            }
+        }
     }
 
     private func prepareForTextInputFocus() {

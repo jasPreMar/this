@@ -8,14 +8,24 @@
     <string>HyperPointer</string>
     <key>CFBundleDisplayName</key>
     <string>HyperPointer</string>
+    <key>CFBundleExecutable</key>
+    <string>HyperPointer</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
     <key>CFBundleVersion</key>
     <string>1</string>
     <key>CFBundleShortVersionString</key>
     <string>1.0</string>
+    <key>LSUIElement</key>
+    <true/>
 
     <!-- Automation (AppleScript/osascript) — shown when Claude controls another app -->
     <key>NSAppleEventsUsageDescription</key>
     <string>HyperPointer uses AppleScript to automate apps on your Mac when you ask it to perform tasks.</string>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>HyperPointer uses your microphone for Shift-to-dictate voice input.</string>
+    <key>NSSpeechRecognitionUsageDescription</key>
+    <string>HyperPointer converts your speech to text so you can dictate prompts hands-free.</string>
 
     <!-- System app data access -->
     <key>NSRemindersUsageDescription</key>
