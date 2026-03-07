@@ -56,6 +56,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         sharedAppDelegate = self
+        setupMainMenu()
         requestInitialPermissions()
         setupRightClickTap()
 
@@ -90,6 +91,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if commandDown && !commandKeyHeld {
             commandKeyHeld = true
 
+            // Don't enter command-key mode when the user is typing in a chat panel —
+            // let standard Cmd shortcuts (⌘A, ⌘C, ⌘Z, etc.) reach the text field.
+            if panels.first(where: { $0.isVisible && $0.searchViewModel.isChatMode && $0.isKeyWindow }) != nil {
+                return
+            }
+
             // Reuse an existing visible non-chat panel if one exists
             if let existing = panels.first(where: {
                 $0.isVisible && !$0.searchViewModel.isChatMode
@@ -112,6 +119,29 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
             commandKeyPanel = nil
         }
+    }
+
+    // MARK: - Main Menu (key equivalents for text editing)
+
+    /// Registers standard Edit menu key equivalents so that Cmd+A, Cmd+C, Cmd+V, etc.
+    /// are dispatched to the first responder (NSTextView) even though we have no visible menu bar.
+    private func setupMainMenu() {
+        let mainMenu = NSMenu()
+
+        let editMenuItem = NSMenuItem()
+        mainMenu.addItem(editMenuItem)
+        let editMenu = NSMenu(title: "Edit")
+        editMenuItem.submenu = editMenu
+
+        editMenu.addItem(NSMenuItem(title: "Undo", action: Selector(("undo:")), keyEquivalent: "z"))
+        editMenu.addItem(NSMenuItem(title: "Redo", action: Selector(("redo:")), keyEquivalent: "Z"))
+        editMenu.addItem(.separator())
+        editMenu.addItem(NSMenuItem(title: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x"))
+        editMenu.addItem(NSMenuItem(title: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c"))
+        editMenu.addItem(NSMenuItem(title: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v"))
+        editMenu.addItem(NSMenuItem(title: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a"))
+
+        NSApp.mainMenu = mainMenu
     }
 
     // MARK: - Permission Setup
@@ -209,7 +239,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func createNewPanel(at point: NSPoint) {
         // Close any existing search-mode panels (no message sent yet)
         for panel in panels where panel.isVisible && !panel.searchViewModel.isChatMode {
-            panel.close()
+            panel.dismiss(restorePreviousFocus: false)
         }
         panels.removeAll { !$0.isVisible }
 
