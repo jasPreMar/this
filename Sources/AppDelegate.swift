@@ -1,6 +1,8 @@
 import AppKit
 import SwiftUI
 import ApplicationServices
+import AVFoundation
+import Speech
 
 // Global reference for CGEventTap callback (C function pointers can't capture context)
 private weak var sharedAppDelegate: AppDelegate?
@@ -51,12 +53,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     fileprivate var eventTap: CFMachPort?
     private var flagsMonitor: Any?
     private var localFlagsMonitor: Any?
+    private var statusItem: NSStatusItem?
     private var commandKeyHeld = false
     private weak var commandKeyPanel: FloatingPanel?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         sharedAppDelegate = self
         setupMainMenu()
+        setupStatusItem()
         requestInitialPermissions()
         setupRightClickTap()
 
@@ -144,6 +148,32 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.mainMenu = mainMenu
     }
 
+    private func setupStatusItem() {
+        let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        if let button = statusItem.button {
+            button.image = NSImage(systemSymbolName: "cursorarrow.motionlines", accessibilityDescription: "HyperPointer")
+            button.imagePosition = .imageOnly
+            button.toolTip = "HyperPointer"
+        }
+
+        let menu = NSMenu()
+        menu.addItem(NSMenuItem(title: "New Panel", action: #selector(handleStatusNewPanel), keyEquivalent: "n"))
+        menu.addItem(.separator())
+        menu.addItem(NSMenuItem(title: "Quit HyperPointer", action: #selector(handleStatusQuit), keyEquivalent: "q"))
+        menu.items.forEach { $0.target = self }
+
+        statusItem.menu = menu
+        self.statusItem = statusItem
+    }
+
+    @objc private func handleStatusNewPanel() {
+        createNewPanel()
+    }
+
+    @objc private func handleStatusQuit() {
+        NSApp.terminate(nil)
+    }
+
     // MARK: - Permission Setup
 
     /// Pre-request all permissions HyperPointer needs so macOS dialogs appear upfront
@@ -159,7 +189,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             CGRequestScreenCaptureAccess()
         }
 
-        // 3. Apple Events (Automation) — required when Claude runs `osascript` to control
+        // 3. Voice input permissions — required for Shift-to-dictate.
+        AVCaptureDevice.requestAccess(for: .audio) { granted in
+            guard granted else { return }
+            SFSpeechRecognizer.requestAuthorization { _ in }
+        }
+
+        // 4. Apple Events (Automation) — required when Claude runs `osascript` to control
         //    other apps. Pre-warm all foreground apps currently running, and observe any
         //    app that launches later. TCC only shows a dialog once per app pair; after
         //    Allow is clicked it's remembered forever.
