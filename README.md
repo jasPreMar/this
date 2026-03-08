@@ -11,6 +11,46 @@ This isn't a new idea — it's actually the original idea behind the graphical u
 That model held up for decades. But menus were always a workaround — a fixed list of options decided in advance by whoever built the software. You were limited to commands they anticipated.
 
 With AI, that limitation disappears. You're no longer choosing from a list. You can ask for anything, in plain language, and the system figures out how to do it. So the windows, icons, and pointer are still useful — the spatial, visual model of computing is still the best way to understand what's on your screen. But the menu is the part that can go. Replace it with a command. Replace the fixed list with a conversation. Keep the pointer, keep the objects, and let the AI handle the rest.
+
+## How it works
+
+Normally, using an AI assistant goes like this:
+
+1. See something on screen
+2. Switch to a chat window
+3. Type: *"I'm in VS Code, looking at a red error in the Problems panel that says 'Cannot find module'..."*
+4. Ask your question
+
+You spend half your effort just describing the context before you can even ask the question.
+
+HyperPointer removes that step:
+
+1. **Press `Ctrl+Space`** (or hold `⌘` and move your mouse, or `Cmd+right-click`)
+2. **A floating panel appears** next to your cursor, above every other window
+3. **The app reads what's under your cursor** using macOS's Accessibility API — the same system screen readers use. It sees the app name, the UI element you're hovering (e.g. `button: Submit` or `text: Cannot find module`), any selected text, and the current URL if you're in a browser
+4. **It takes a screenshot** of the window you're looking at
+5. **You type your question and hit Enter** — your question, the context, and the screenshot are all sent to Claude automatically
+6. **Claude responds in the panel**, streaming as it arrives. Follow-up messages keep the full conversation context
+7. **Close the panel** and focus returns to exactly where you were
+
+## How it's built
+
+| File | What it does |
+|---|---|
+| `AppDelegate.swift` | Boots the app; listens globally for `Ctrl+Space` and `⌘+right-click` |
+| `FloatingPanel.swift` | The floating window — lives above all other windows, follows your cursor |
+| `SearchViewModel.swift` | Reads the Accessibility tree to identify what's under the cursor; takes screenshots |
+| `TerminalContentView.swift` | The chat UI that streams Claude's response |
+| `ClaudeProcessManager` | Shells out to the `claude` CLI to talk to Claude |
+
+## Permissions
+
+| Permission | Why |
+|---|---|
+| Accessibility | To read what UI element is under your cursor |
+| Screen Recording | To take a screenshot of the window you're looking at |
+| Automation | So Claude can run `osascript` to control other apps when you ask it to |
+
 ## Requirements
 
 - macOS 14.0+ (Sonoma)
@@ -39,9 +79,10 @@ This writes the grants directly to the TCC database so no popups ever appear.
 ## Usage
 
 - **Ctrl+Space** — Open the panel at your cursor
-- **Right-click** — Intercept right-click to open the panel
+- **Hold ⌘** — Panel follows your cursor; release to anchor it and type
+- **Cmd+right-click** — Open the panel at the clicked location
 
-Once the panel appears, you'll see context about the UI element under your cursor (app name, element role, hierarchy). Type a question and hit enter to start a streaming conversation with Claude. Follow-up messages keep the same session context.
+Once the panel appears, it shows context about the UI element under your cursor (app name, element role, hierarchy). Type a question and hit Enter to start a streaming conversation with Claude. Follow-up messages keep the same session context.
 
 ## Things to Try
 
