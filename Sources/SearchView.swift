@@ -149,8 +149,6 @@ struct PanelHeaderSection<Accessory: View>: View {
                         showsCloseButtonOnHover: showsCloseButtonOnHover,
                         onClose: onClose
                     )
-
-                    Spacer(minLength: 8)
                     accessory
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -163,9 +161,29 @@ struct PanelHeaderSection<Accessory: View>: View {
                         .foregroundColor(.secondary)
                         .frame(width: 16, alignment: .center)
 
-                    VoiceStatusView(state: viewModel.voiceState, level: viewModel.voiceLevel)
+                    Group {
+                        switch viewModel.voiceState {
+                        case .listening:
+                            Text("Release Shift to send")
+                                .font(.system(size: 13))
+                                .foregroundColor(.secondary)
+                        case .transcribing:
+                            Text("Transcribing...")
+                                .font(.system(size: 13))
+                                .foregroundColor(.secondary)
+                        case .failed(let msg):
+                            Text(msg)
+                                .font(.system(size: 13))
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                                .foregroundColor(.secondary)
+                        case .idle:
+                            EmptyView()
+                        }
+                    }
 
                     Spacer(minLength: 8)
+                    VoiceTrailingIndicator(state: viewModel.voiceState, level: viewModel.voiceLevel)
                     accessory
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -351,16 +369,16 @@ struct ContextSummaryView: View {
             leadingIcon
                 .frame(width: 16, height: 16, alignment: .center)
 
-            if voiceState == .idle {
-                Text(displayText(text))
-                    .font(.system(size: 13))
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .foregroundColor(.primary)
-            } else {
-                VoiceStatusView(state: voiceState, level: voiceLevel)
-            }
+            Text(displayText(text))
+                .font(.system(size: 13))
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .foregroundColor(.primary)
+
+            Spacer(minLength: 8)
+            VoiceTrailingIndicator(state: voiceState, level: voiceLevel)
         }
+        .frame(maxWidth: .infinity)
         .onHover { isHovered = $0 }
     }
 
@@ -439,31 +457,52 @@ struct ContextSummaryView: View {
     }
 }
 
-struct VoiceStatusView: View {
+struct VoiceTrailingIndicator: View {
     let state: SearchViewModel.VoiceState
     let level: CGFloat
 
     var body: some View {
-        switch state {
-        case .idle:
-            EmptyView()
-        case .listening:
-            HStack(spacing: 8) {
-                VoiceWaveformView(level: level)
-                Text("Release Shift to send")
-                    .font(.system(size: 12))
+        Group {
+            switch state {
+            case .idle:
+                HStack(spacing: 3) {
+                    Image(systemName: "shift")
+                        .font(.system(size: 11, weight: .medium))
+                    Image(systemName: "mic")
+                        .font(.system(size: 11, weight: .medium))
+                }
+                .foregroundColor(Color.secondary.opacity(0.45))
+            case .listening:
+                CompactVoiceWaveformView(level: level)
+            case .transcribing:
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 9))
                     .foregroundColor(.secondary)
+            case .failed:
+                EmptyView()
             }
-        case .transcribing:
-            Text("Transcribing...")
-                .font(.system(size: 12))
-                .foregroundColor(.secondary)
-        case .failed(let message):
-            Text(message)
-                .font(.system(size: 12))
-                .lineLimit(1)
-                .truncationMode(.tail)
-                .foregroundColor(.secondary)
+        }
+    }
+}
+
+struct CompactVoiceWaveformView: View {
+    let level: CGFloat
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 0.08)) { timeline in
+            let time = timeline.date.timeIntervalSinceReferenceDate
+
+            HStack(alignment: .center, spacing: 2) {
+                ForEach(0..<4, id: \.self) { index in
+                    let phase = abs(sin(time * 6 + Double(index) * 0.65))
+                    let amplitude = max(0.18, min(1, level * (0.75 + (phase * 0.75))))
+
+                    RoundedRectangle(cornerRadius: 1.5)
+                        .fill(Color.accentColor.opacity(0.95))
+                        .frame(width: 3, height: 5 + (amplitude * 14))
+                }
+            }
+            .frame(height: 20, alignment: .center)
         }
     }
 }
