@@ -2,8 +2,10 @@ BINARY    := .build/debug/HyperPointer
 CERT_NAME := HyperPointer Dev
 BUNDLE_ID := com.hyperpointer.app
 USER_TCC  := $(HOME)/Library/Application Support/com.apple.TCC/TCC.db
+APP_PATH  := dist/HyperPointer.app
+DMG_PATH  := dist/HyperPointer.dmg
 
-.PHONY: build run sign grant reset-tcc cert-instructions
+.PHONY: build run sign app install dmg grant reset-tcc cert-instructions
 
 # Build and sign (sign only if cert exists)
 build:
@@ -20,6 +22,15 @@ sign:
 
 run: build
 	"$(BINARY)"
+
+app:
+	./scripts/build-app.sh
+
+install:
+	./scripts/build-app.sh --install
+
+dmg:
+	./scripts/build-dmg.sh
 
 # Create a self-signed code-signing cert via Keychain Access (one-time setup).
 cert-instructions:

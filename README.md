@@ -26,6 +26,33 @@ make build
 ./.build/debug/HyperPointer
 ```
 
+To package it as a normal macOS app bundle:
+
+```bash
+make app
+open dist/HyperPointer.app
+```
+
+To install the app into `/Applications`:
+
+```bash
+make install
+```
+
+If your shell user cannot write to `/Applications`, rerun with `sudo` or choose a different destination:
+
+```bash
+sudo make install
+INSTALL_DIR="$HOME/Applications" make install
+```
+
+To build a drag-to-install disk image:
+
+```bash
+make dmg
+open dist/HyperPointer.dmg
+```
+
 On first launch, macOS will prompt you to grant Accessibility and Screen Recording permissions. It will also show Automation permission dialogs for any apps currently running — click Allow for each. These are one-time prompts; macOS remembers your choices permanently.
 
 To skip all permission dialogs entirely, run once after building:
@@ -35,6 +62,12 @@ sudo make grant
 ```
 
 This writes the grants directly to the TCC database so no popups ever appear.
+
+The `.app` and `.dmg` targets default to ad-hoc signing so they work cleanly on the local machine. If you want a distributable artifact for other Macs, pass a real Developer ID identity and notarize the result:
+
+```bash
+SIGN_MODE=identity SIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)" make dmg
+```
 
 ## Usage
 
