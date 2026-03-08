@@ -19,6 +19,16 @@
     <key>LSUIElement</key>
     <true/>
 
+    <!-- Sparkle auto-update -->
+    <key>SUFeedURL</key>
+    <string>https://raw.githubusercontent.com/jasPreMar/hyper-pointer/main/appcast.xml</string>
+    <!-- Run `generate_keys` from Sparkle's bin/ to produce this key pair.
+         Store the private key as SPARKLE_PRIVATE_KEY in GitHub Actions secrets. -->
+    <key>SUPublicEDKey</key>
+    <string>mQXgtNQZ6w86NlL8vf1PK9q2tvD2eO16PKh3Sxu3i2M=</string>
+    <key>SUEnableAutomaticChecks</key>
+    <true/>
+
     <!-- Automation (AppleScript/osascript) — shown when Claude controls another app -->
     <key>NSAppleEventsUsageDescription</key>
     <string>HyperPointer uses AppleScript to automate apps on your Mac when you ask it to perform tasks.</string>

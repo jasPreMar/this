@@ -3,6 +3,7 @@ import SwiftUI
 import ApplicationServices
 import AVFoundation
 import Speech
+import Sparkle
 
 // Global reference for CGEventTap callback (C function pointers can't capture context)
 private weak var sharedAppDelegate: AppDelegate?
@@ -56,10 +57,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private var commandKeyHeld = false
     private weak var commandKeyPanel: FloatingPanel?
+    private var updaterController: SPUStandardUpdaterController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         sharedAppDelegate = self
         setupMainMenu()
+        updaterController = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: nil, userDriverDelegate: nil)
         setupStatusItem()
         requestInitialPermissions()
         setupRightClickTap()
@@ -156,11 +159,21 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             button.toolTip = "HyperPointer"
         }
 
+        let newPanelItem = NSMenuItem(title: "New Panel", action: #selector(handleStatusNewPanel), keyEquivalent: "n")
+        newPanelItem.target = self
+
+        let checkForUpdatesItem = NSMenuItem(title: "Check for Updates…", action: #selector(SPUStandardUpdaterController.checkForUpdates(_:)), keyEquivalent: "")
+        checkForUpdatesItem.target = updaterController
+
+        let quitItem = NSMenuItem(title: "Quit HyperPointer", action: #selector(handleStatusQuit), keyEquivalent: "q")
+        quitItem.target = self
+
         let menu = NSMenu()
-        menu.addItem(NSMenuItem(title: "New Panel", action: #selector(handleStatusNewPanel), keyEquivalent: "n"))
+        menu.addItem(newPanelItem)
         menu.addItem(.separator())
-        menu.addItem(NSMenuItem(title: "Quit HyperPointer", action: #selector(handleStatusQuit), keyEquivalent: "q"))
-        menu.items.forEach { $0.target = self }
+        menu.addItem(checkForUpdatesItem)
+        menu.addItem(.separator())
+        menu.addItem(quitItem)
 
         statusItem.menu = menu
         self.statusItem = statusItem

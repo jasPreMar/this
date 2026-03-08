@@ -93,24 +93,39 @@ mkdir -p "$MACOS_PATH" "$RESOURCES_PATH"
 cp "$BINARY_PATH" "$MACOS_PATH/$APP_NAME"
 cp "$ROOT_DIR/Sources/Info.plist" "$CONTENTS_PATH/Info.plist"
 
+# Embed Sparkle.framework (extracted by SPM into .build/artifacts/)
+SPARKLE_FRAMEWORK="$(find "$ROOT_DIR/.build/artifacts" -name "Sparkle.framework" -type d 2>/dev/null | head -1)"
+if [[ -n "$SPARKLE_FRAMEWORK" ]]; then
+  FRAMEWORKS_PATH="$CONTENTS_PATH/Frameworks"
+  mkdir -p "$FRAMEWORKS_PATH"
+  rm -rf "$FRAMEWORKS_PATH/Sparkle.framework"
+  cp -R "$SPARKLE_FRAMEWORK" "$FRAMEWORKS_PATH/"
+fi
+
 if [[ "$SIGN_MODE" != "skip" ]]; then
   xattr -cr "$APP_PATH" 2>/dev/null || true
 
   if [[ "$SIGN_MODE" == "identity" ]]; then
-    codesign \
-      --force \
-      --deep \
-      --sign "$SIGN_IDENTITY" \
-      --timestamp=none \
-      "$APP_PATH"
+    SIGN_ARG="$SIGN_IDENTITY"
   else
-    codesign \
-      --force \
-      --deep \
-      --sign - \
-      --timestamp=none \
-      "$APP_PATH"
+    SIGN_ARG="-"
   fi
+
+  # Sign nested components before the app bundle
+  if [[ -d "$CONTENTS_PATH/Frameworks/Sparkle.framework" ]]; then
+    # Sign XPC services inside Sparkle
+    find "$CONTENTS_PATH/Frameworks/Sparkle.framework" -name "*.xpc" -type d | while read xpc; do
+      codesign --force --sign "$SIGN_ARG" --timestamp=none "$xpc"
+    done
+    codesign --force --sign "$SIGN_ARG" --timestamp=none "$CONTENTS_PATH/Frameworks/Sparkle.framework"
+  fi
+
+  codesign \
+    --force \
+    --deep \
+    --sign "$SIGN_ARG" \
+    --timestamp=none \
+    "$APP_PATH"
 fi
 
 echo "Built app bundle: $APP_PATH"

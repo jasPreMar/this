@@ -6,12 +6,14 @@ let package = Package(
     platforms: [.macOS(.v14)],
     dependencies: [
         .package(url: "https://github.com/gonzalezreal/swift-markdown-ui", from: "2.0.2"),
+        .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.0.0"),
     ],
     targets: [
         .executableTarget(
             name: "HyperPointer",
             dependencies: [
                 .product(name: "MarkdownUI", package: "swift-markdown-ui"),
+                .product(name: "Sparkle", package: "Sparkle"),
             ],
             path: "Sources",
             exclude: ["Info.plist"],
@@ -23,6 +25,9 @@ let package = Package(
                     "-Xlinker", "__TEXT",
                     "-Xlinker", "__info_plist",
                     "-Xlinker", "Sources/Info.plist",
+                    // Sparkle.framework is embedded at Contents/Frameworks at runtime
+                    "-Xlinker", "-rpath",
+                    "-Xlinker", "@executable_path/../Frameworks",
                 ])
             ]
         )

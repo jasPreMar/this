@@ -1,0 +1,123 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  release:
+    runs-on: macos-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          # Use a PAT so the commit this job pushes can trigger future workflows.
+          # If you don't need that, the default GITHUB_TOKEN is fine.
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Determine version
+        id: version
+        run: |
+          SHORT=$(cat VERSION)
+          BUILD=${{ github.run_number }}
+          echo "short=$SHORT"   >> $GITHUB_OUTPUT
+          echo "build=$BUILD"   >> $GITHUB_OUTPUT
+          echo "tag=v${SHORT}.${BUILD}" >> $GITHUB_OUTPUT
+
+      - name: Stamp version into Info.plist
+        run: |
+          SHORT=${{ steps.version.outputs.short }}
+          BUILD=${{ steps.version.outputs.build }}
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $SHORT" Sources/Info.plist
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD"            Sources/Info.plist
+
+      - name: Resolve Swift packages
+        run: swift package resolve
+
+      - name: Build DMG
+        run: ./scripts/build-dmg.sh
+
+      - name: Collect DMG metadata
+        id: dmg
+        run: |
+          SIZE=$(stat -f%z dist/HyperPointer.dmg)
+          echo "size=$SIZE" >> $GITHUB_OUTPUT
+
+      # -----------------------------------------------------------------------
+      # Sparkle EdDSA signing
+      # Requires SPARKLE_PRIVATE_KEY secret — see README for key-generation steps.
+      # -----------------------------------------------------------------------
+      - name: Download Sparkle tools
+        run: |
+          SPARKLE_VER="2.6.4"
+          curl -fsSL "https://github.com/sparkle-project/Sparkle/releases/download/${SPARKLE_VER}/Sparkle-${SPARKLE_VER}.tar.xz" \
+            -o sparkle.tar.xz
+          mkdir -p sparkle-tools
+          tar -xf sparkle.tar.xz -C sparkle-tools
+
+      - name: Sign DMG with Sparkle EdDSA key
+        id: sign
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: |
+          SIG=$(echo "$SPARKLE_PRIVATE_KEY" \
+            | ./sparkle-tools/bin/sign_update dist/HyperPointer.dmg \
+            | grep -o 'sparkle:edSignature="[^"]*"' \
+            | sed 's/sparkle:edSignature="//;s/"//')
+          echo "signature=$SIG" >> $GITHUB_OUTPUT
+
+      # -----------------------------------------------------------------------
+      # Update appcast.xml (replaces the entire file with the latest release)
+      # -----------------------------------------------------------------------
+      - name: Update appcast.xml
+        env:
+          TAG:       ${{ steps.version.outputs.tag }}
+          SHORT:     ${{ steps.version.outputs.short }}
+          BUILD:     ${{ steps.version.outputs.build }}
+          SIZE:      ${{ steps.dmg.outputs.size }}
+          SIGNATURE: ${{ steps.sign.outputs.signature }}
+        run: |
+          PUBDATE=$(date -u +"%a, %d %b %Y %H:%M:%S +0000")
+          cat > appcast.xml <<EOF
+          <?xml version="1.0" encoding="utf-8"?>
+          <rss version="2.0"
+               xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle"
+               xmlns:dc="http://purl.org/dc/elements/1.1/">
+            <channel>
+              <title>HyperPointer Updates</title>
+              <link>https://github.com/jasPreMar/hyper-pointer</link>
+              <description>HyperPointer changelog</description>
+              <language>en</language>
+              <item>
+                <title>Version ${SHORT} (${BUILD})</title>
+                <sparkle:version>${BUILD}</sparkle:version>
+                <sparkle:shortVersionString>${SHORT}</sparkle:shortVersionString>
+                <pubDate>${PUBDATE}</pubDate>
+                <enclosure
+                  url="https://github.com/jasPreMar/hyper-pointer/releases/download/${TAG}/HyperPointer.dmg"
+                  length="${SIZE}"
+                  type="application/octet-stream"
+                  sparkle:edSignature="${SIGNATURE}" />
+              </item>
+            </channel>
+          </rss>
+          EOF
+
+      - name: Commit updated Info.plist and appcast.xml
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Sources/Info.plist appcast.xml
+          git commit -m "chore: release ${{ steps.version.outputs.tag }} [skip ci]"
+          git push
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name:     ${{ steps.version.outputs.tag }}
+          files:    dist/HyperPointer.dmg
+          generate_release_notes: true

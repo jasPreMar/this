@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0"
+     xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle"
+     xmlns:dc="http://purl.org/dc/elements/1.1/">
+  <channel>
+    <title>HyperPointer Updates</title>
+    <link>https://github.com/jasPreMar/hyper-pointer</link>
+    <description>HyperPointer changelog</description>
+    <language>en</language>
+    <!-- Releases are appended here automatically by GitHub Actions on each merge to main -->
+  </channel>
+</rss>
