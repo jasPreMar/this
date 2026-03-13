@@ -109,6 +109,25 @@ The `.app` and `.dmg` targets default to ad-hoc signing so they work cleanly on 
 SIGN_MODE=identity SIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)" make dmg
 ```
 
+## Sparkle Release Signing
+
+The GitHub Actions release job signs the published DMG with Sparkle's Ed25519 key. It expects a `SPARKLE_PRIVATE_KEY` repository secret containing the exported private key contents, not the `sparkle:edSignature` output.
+
+To create or recover the matching keypair:
+
+```bash
+swift package resolve
+./.build/artifacts/sparkle/Sparkle/bin/generate_keys
+```
+
+That command prints the public key to embed in `SUPublicEDKey` inside `Sources/Info.plist`. To export the private key for CI:
+
+```bash
+./.build/artifacts/sparkle/Sparkle/bin/generate_keys -x sparkle-private-key.txt
+```
+
+Copy the contents of `sparkle-private-key.txt` into the `SPARKLE_PRIVATE_KEY` GitHub secret, then delete the file. The release workflow reads that secret with `sign_update --ed-key-file -`, signs `dist/HyperPointer.dmg`, and writes the resulting signature into `appcast.xml`.
+
 ## Usage
 
 - **Ctrl+Space** — Open the panel at your cursor

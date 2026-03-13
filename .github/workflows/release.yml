@@ -63,11 +63,24 @@ jobs:
         env:
           SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
         run: |
-          SIG=$(echo "$SPARKLE_PRIVATE_KEY" \
-            | ./sparkle-tools/bin/sign_update dist/HyperPointer.dmg \
-            | grep -o 'sparkle:edSignature="[^"]*"' \
-            | sed 's/sparkle:edSignature="//;s/"//')
-          echo "signature=$SIG" >> $GITHUB_OUTPUT
+          set -euo pipefail
+
+          if [[ -z "${SPARKLE_PRIVATE_KEY:-}" ]]; then
+            echo "SPARKLE_PRIVATE_KEY is not configured" >&2
+            exit 1
+          fi
+
+          SIG="$(
+            printf '%s' "$SPARKLE_PRIVATE_KEY" \
+              | ./sparkle-tools/bin/sign_update --ed-key-file - -p dist/HyperPointer.dmg
+          )"
+
+          if [[ -z "$SIG" ]]; then
+            echo "Sparkle signature was empty" >&2
+            exit 1
+          fi
+
+          echo "signature=$SIG" >> "$GITHUB_OUTPUT"
 
       # -----------------------------------------------------------------------
       # Update appcast.xml (replaces the entire file with the latest release)
