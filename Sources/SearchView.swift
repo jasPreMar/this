@@ -255,6 +255,7 @@ struct FocusedTextField: NSViewRepresentable {
         textView.font = .monospacedSystemFont(ofSize: 13, weight: .regular)
         textView.backgroundColor = .clear
         textView.drawsBackground = false
+        textView.textColor = .labelColor
         textView.textContainerInset = .zero
         textView.textContainer?.lineFragmentPadding = 0
         textView.isVerticallyResizable = true
