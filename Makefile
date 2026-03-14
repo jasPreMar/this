@@ -24,10 +24,18 @@ run: build
 	"$(BINARY)"
 
 app:
-	./scripts/build-app.sh
+	@if security find-identity -v -p codesigning 2>/dev/null | grep -q "$(CERT_NAME)"; then \
+		./scripts/build-app.sh --sign-mode identity --sign-identity "$(CERT_NAME)"; \
+	else \
+		./scripts/build-app.sh; \
+	fi
 
 install:
-	./scripts/build-app.sh --install
+	@if security find-identity -v -p codesigning 2>/dev/null | grep -q "$(CERT_NAME)"; then \
+		./scripts/build-app.sh --install --sign-mode identity --sign-identity "$(CERT_NAME)"; \
+	else \
+		./scripts/build-app.sh --install; \
+	fi
 
 dmg:
 	./scripts/build-dmg.sh
