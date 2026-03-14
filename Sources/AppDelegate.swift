@@ -159,6 +159,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             button.toolTip = "HyperPointer"
         }
 
+        let bundle = Bundle.main
+        let shortVersion = bundle.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
+        let buildNumber = bundle.infoDictionary?["CFBundleVersion"] as? String ?? "?"
+        let versionItem = NSMenuItem(title: "HyperPointer v\(shortVersion).\(buildNumber)", action: nil, keyEquivalent: "")
+        versionItem.isEnabled = false
+
         let newPanelItem = NSMenuItem(title: "New Panel", action: #selector(handleStatusNewPanel), keyEquivalent: "n")
         newPanelItem.target = self
 
@@ -169,6 +175,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         quitItem.target = self
 
         let menu = NSMenu()
+        menu.addItem(versionItem)
+        menu.addItem(.separator())
         menu.addItem(newPanelItem)
         menu.addItem(.separator())
         menu.addItem(checkForUpdatesItem)
