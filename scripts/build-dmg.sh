@@ -12,14 +12,9 @@ SIGN_IDENTITY="${SIGN_IDENTITY:-}"
 SIGN_MODE="${SIGN_MODE:-ad-hoc}"
 TEMP_DIR="$(mktemp -d)"
 STAGING_DIR="$TEMP_DIR/staging"
-MOUNT_DIR=""
 RW_DMG_PATH="$TEMP_DIR/$APP_NAME-rw.dmg"
-DEVICE=""
 
 cleanup() {
-  if [[ -n "$DEVICE" ]]; then
-    hdiutil detach "$DEVICE" -quiet >/dev/null 2>&1 || true
-  fi
   rm -rf "$TEMP_DIR"
 }
 trap cleanup EXIT
@@ -74,8 +69,6 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-MOUNT_DIR="/Volumes/$VOLUME_NAME"
-
 mkdir -p "$DIST_DIR" "$STAGING_DIR"
 
 build_app_args=(
@@ -101,45 +94,6 @@ hdiutil create \
   -srcfolder "$STAGING_DIR" \
   -format UDRW \
   "$RW_DMG_PATH"
-
-DEVICE="$(
-  rmdir "$MOUNT_DIR" >/dev/null 2>&1 || true
-  hdiutil attach \
-    -readwrite \
-    -noverify \
-    -noautoopen \
-    -mountpoint "$MOUNT_DIR" \
-    "$RW_DMG_PATH" | awk 'NR==1 {print $1}'
-)"
-
-open "$MOUNT_DIR"
-sleep 1
-
-osascript <<EOF
-tell application "Finder"
-  tell disk "$VOLUME_NAME"
-    open
-    set current view of container window to icon view
-    set toolbar visible of container window to false
-    set statusbar visible of container window to false
-    set the bounds of container window to {120, 120, 700, 430}
-    set viewOptions to the icon view options of container window
-    set arrangement of viewOptions to not arranged
-    set icon size of viewOptions to 128
-    set text size of viewOptions to 14
-    set position of item "$APP_NAME.app" of container window to {180, 170}
-    set position of item "Applications" of container window to {460, 170}
-    close
-    open
-    update without registering applications
-    delay 2
-  end tell
-end tell
-EOF
-
-sync
-hdiutil detach "$DEVICE" -quiet
-DEVICE=""
 
 hdiutil convert \
   -quiet \
