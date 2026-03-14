@@ -31,8 +31,8 @@ jobs:
         run: |
           SHORT=${{ steps.version.outputs.short }}
           BUILD=${{ steps.version.outputs.build }}
-          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $SHORT" Sources/Info.plist
-          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD"            Sources/Info.plist
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${SHORT}.${BUILD}" Sources/Info.plist
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD"                       Sources/Info.plist
 
       - name: Resolve Swift packages
         run: swift package resolve
@@ -105,9 +105,9 @@ jobs:
               <description>HyperPointer changelog</description>
               <language>en</language>
               <item>
-                <title>Version ${SHORT} (${BUILD})</title>
+                <title>Version ${SHORT}.${BUILD}</title>
                 <sparkle:version>${BUILD}</sparkle:version>
-                <sparkle:shortVersionString>${SHORT}</sparkle:shortVersionString>
+                <sparkle:shortVersionString>${SHORT}.${BUILD}</sparkle:shortVersionString>
                 <pubDate>${PUBDATE}</pubDate>
                 <enclosure
                   url="https://github.com/jasPreMar/hyper-pointer/releases/download/${TAG}/HyperPointer.dmg"
