@@ -83,8 +83,11 @@ class FloatingPanel: NSPanel {
     override func sendEvent(_ event: NSEvent) {
         if event.type == .leftMouseDown, isTerminalMode,
            let contentView = contentView {
-            let point = contentView.convert(event.locationInWindow, from: nil)
-            if let hit = contentView.hitTest(point), !isInteractiveControl(hit) {
+            // hitTest expects a point in the receiver's superview coordinate system,
+            // which for a borderless panel matches window base coordinates directly.
+            // Do NOT use convert(from: nil) — NSHostingView is flipped so that
+            // conversion would produce wrong Y values and hitTest would miss.
+            if let hit = contentView.hitTest(event.locationInWindow), !isInteractiveControl(hit) {
                 performDrag(with: event)
                 return
             }
