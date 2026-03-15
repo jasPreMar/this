@@ -58,11 +58,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private weak var commandKeyPanel: FloatingPanel?
     private var updaterController: SPUStandardUpdaterController?
     private let onboardingSeenKey = "hasShownOnboarding"
+    private var checkForUpdatesItem: NSMenuItem?
+    private var updateDot: NSView?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         sharedAppDelegate = self
         setupMainMenu()
-        updaterController = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: nil, userDriverDelegate: nil)
+        updaterController = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: self, userDriverDelegate: nil)
         setupStatusItem()
         setupRightClickTapIfNeeded()
         showOnboardingIfNeeded()
@@ -170,6 +172,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         let checkForUpdatesItem = NSMenuItem(title: "Check for Updates…", action: #selector(SPUStandardUpdaterController.checkForUpdates(_:)), keyEquivalent: "")
         checkForUpdatesItem.target = updaterController
+        self.checkForUpdatesItem = checkForUpdatesItem
 
         let onboardingItem = NSMenuItem(title: "Open Onboarding", action: #selector(handleStatusOpenOnboarding), keyEquivalent: ",")
         onboardingItem.target = self
@@ -298,6 +301,34 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let panel = FloatingPanel()
         panels.append(panel)
         panel.show(at: point)
+    }
+
+    private func showUpdateBadge() {
+        checkForUpdatesItem?.title = "Update Available"
+
+        guard let button = statusItem?.button, updateDot == nil else { return }
+        let dotSize: CGFloat = 6
+        let dot = NSView(frame: NSRect(
+            x: button.bounds.maxX - dotSize - 3,
+            y: button.bounds.maxY - dotSize - 3,
+            width: dotSize,
+            height: dotSize
+        ))
+        dot.wantsLayer = true
+        dot.layer?.backgroundColor = NSColor.systemRed.cgColor
+        dot.layer?.cornerRadius = dotSize / 2
+        button.addSubview(dot)
+        updateDot = dot
+    }
+}
+
+// MARK: - SPUUpdaterDelegate
+
+extension AppDelegate: SPUUpdaterDelegate {
+    func updater(_ updater: SPUUpdater, didFindValidUpdate item: SUAppcastItem) {
+        DispatchQueue.main.async { [weak self] in
+            self?.showUpdateBadge()
+        }
     }
 }
 
