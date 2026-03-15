@@ -426,7 +426,7 @@ private struct FinishStep: View {
                 }
                 .padding(16)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color.orange.opacity(0.08))
+                .background(Color.green.opacity(0.08))
                 .clipShape(RoundedRectangle(cornerRadius: 14))
             }
             .padding(28)
