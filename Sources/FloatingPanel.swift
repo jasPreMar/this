@@ -190,6 +190,29 @@ class FloatingPanel: NSPanel {
         isCursorFollowing = false
         removeAllMonitors()
 
+        // Convert to a normal titled window so it behaves like any other window:
+        // standard z-ordering (click to front, other windows can go in front),
+        // native traffic-light controls, and user-resizable.
+        let previousTop = frame.maxY
+        let previousOriginX = frame.minX
+        styleMask = [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]
+        level = .normal
+        titlebarAppearsTransparent = true
+        titleVisibility = .hidden
+        isOpaque = true
+        backgroundColor = .windowBackgroundColor
+        hasShadow = true
+        let chatSize = CGSize(width: 460, height: 520)
+        setContentSize(chatSize)
+        // Preserve position of the top-left corner, clamped to screen
+        var nextOrigin = NSPoint(x: previousOriginX, y: previousTop - frame.height)
+        if let scr = screen ?? NSScreen.screens.first(where: { $0.visibleFrame.intersects(frame) }) ?? NSScreen.main {
+            let sf = scr.visibleFrame
+            nextOrigin.x = max(sf.minX, min(nextOrigin.x, sf.maxX - frame.width))
+            nextOrigin.y = max(sf.minY, min(nextOrigin.y, sf.maxY - frame.height))
+        }
+        setFrameOrigin(nextOrigin)
+
         // Switch to chat mode — the PanelContentView handles the rest
         searchViewModel.chatHistory.append((role: "user", text: searchViewModel.query))
         searchViewModel.query = ""
@@ -234,6 +257,7 @@ class FloatingPanel: NSPanel {
     }
 
     private func resizeToContentSize(_ size: CGSize, preserveTopEdge: Bool) {
+        guard !isTerminalMode else { return }
         let normalizedSize = CGSize(
             width: min(ceil(size.width), Self.maxPanelDimension),
             height: min(ceil(size.height), Self.maxPanelDimension)
@@ -386,6 +410,14 @@ class FloatingPanel: NSPanel {
         removeAllMonitors()
         voiceController.cancel()
         super.close()
+        // Restore panel appearance for potential reuse
+        if isTerminalMode {
+            styleMask = [.borderless, .nonactivatingPanel]
+            level = .screenSaver
+            isOpaque = false
+            backgroundColor = .clear
+            hasShadow = false
+        }
         searchViewModel.query = ""
         searchViewModel.isChatMode = false
         searchViewModel.isCommandKeyMode = false

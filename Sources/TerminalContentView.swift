@@ -813,82 +813,72 @@ struct ChatView: View {
     @ObservedObject var viewModel: SearchViewModel
     @State private var textWidth: CGFloat = FocusedTextField.minWidth
     @State private var textHeight: CGFloat = 18
-    private let fixedChatHeight: CGFloat = 360
 
     private var hasContextRow: Bool {
         viewModel.hoveredParts.last != nil
     }
 
     var body: some View {
-        PanelSurface(fixedHeight: fixedChatHeight) {
-            VStack(spacing: 0) {
-                if hasContextRow {
-                    PanelHeaderSection(
-                        viewModel: viewModel,
-                        showsCloseButtonOnHover: true,
-                        onClose: viewModel.onClose
-                    )
-                } else {
-                    if !viewModel.selectedText.isEmpty {
-                        PanelHeaderSection(viewModel: viewModel)
-
-                        Divider()
-                            .padding(.horizontal, 8)
-                    }
-
-                    ChatCloseRow(viewModel: viewModel)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 7)
-                }
-
+        VStack(spacing: 0) {
+            if hasContextRow {
+                PanelHeaderSection(
+                    viewModel: viewModel,
+                    showsCloseButtonOnHover: false,
+                    onClose: viewModel.onClose
+                )
+            } else if !viewModel.selectedText.isEmpty {
+                PanelHeaderSection(viewModel: viewModel)
                 Divider()
                     .padding(.horizontal, 8)
+            }
 
-                ScrollViewReader { proxy in
-                    ScrollView {
-                        HStack(alignment: .top, spacing: 0) {
-                            transcriptContent
-                            Spacer(minLength: 0)
-                        }
+            Divider()
+                .padding(.horizontal, 8)
+
+            ScrollViewReader { proxy in
+                ScrollView {
+                    HStack(alignment: .top, spacing: 0) {
+                        transcriptContent
+                        Spacer(minLength: 0)
                     }
-                    .frame(maxHeight: .infinity, alignment: .top)
-                    .onAppear {
+                }
+                .frame(maxHeight: .infinity, alignment: .top)
+                .onAppear {
+                    proxy.scrollTo("bottom", anchor: .bottom)
+                }
+                .onChange(of: viewModel.claudeManager?.outputText) { _, _ in
+                    withAnimation(.easeOut(duration: 0.1)) {
                         proxy.scrollTo("bottom", anchor: .bottom)
                     }
-                    .onChange(of: viewModel.claudeManager?.outputText) { _, _ in
-                        withAnimation(.easeOut(duration: 0.1)) {
-                            proxy.scrollTo("bottom", anchor: .bottom)
-                        }
-                    }
-                    .onChange(of: viewModel.chatHistory.count) { _, _ in
-                        withAnimation(.easeOut(duration: 0.1)) {
-                            proxy.scrollTo("bottom", anchor: .bottom)
-                        }
-                    }
-                    .onChange(of: viewModel.claudeManager?.events.count) { _, _ in
-                        withAnimation(.easeOut(duration: 0.1)) {
-                            proxy.scrollTo("bottom", anchor: .bottom)
-                        }
-                    }
-                    .onChange(of: viewModel.claudeManager?.status) { _, _ in
-                        withAnimation(.easeOut(duration: 0.1)) {
-                            proxy.scrollTo("bottom", anchor: .bottom)
-                        }
+                }
+                .onChange(of: viewModel.chatHistory.count) { _, _ in
+                    withAnimation(.easeOut(duration: 0.1)) {
+                        proxy.scrollTo("bottom", anchor: .bottom)
                     }
                 }
-
-                Divider()
-                    .padding(.horizontal, 8)
-
-                PanelInputRow(
-                    viewModel: viewModel,
-                    textWidth: $textWidth,
-                    textHeight: $textHeight,
-                    expandsTextField: true
-                )
+                .onChange(of: viewModel.claudeManager?.events.count) { _, _ in
+                    withAnimation(.easeOut(duration: 0.1)) {
+                        proxy.scrollTo("bottom", anchor: .bottom)
+                    }
+                }
+                .onChange(of: viewModel.claudeManager?.status) { _, _ in
+                    withAnimation(.easeOut(duration: 0.1)) {
+                        proxy.scrollTo("bottom", anchor: .bottom)
+                    }
+                }
             }
-            .frame(maxHeight: .infinity, alignment: .top)
+
+            Divider()
+                .padding(.horizontal, 8)
+
+            PanelInputRow(
+                viewModel: viewModel,
+                textWidth: $textWidth,
+                textHeight: $textHeight,
+                expandsTextField: true
+            )
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 
     private var transcriptContent: some View {
@@ -930,22 +920,6 @@ struct ChatView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-    }
-}
-
-private struct ChatCloseRow: View {
-    @ObservedObject var viewModel: SearchViewModel
-
-    var body: some View {
-        HStack {
-            Button(action: { viewModel.onClose?() }) {
-                Circle()
-                    .fill(Color(nsColor: .systemRed))
-                    .frame(width: 12, height: 12)
-            }
-            .buttonStyle(.plain)
-            Spacer()
-        }
     }
 }
 
