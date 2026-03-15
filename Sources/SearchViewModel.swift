@@ -262,7 +262,7 @@ class SearchViewModel: ObservableObject {
         // Store the PID of the hovered app for screenshot use
         var pid: pid_t = 0
         AXUIElementGetPid(resolvedElement, &pid)
-        if let app = NSRunningApplication(processIdentifier: pid), app.localizedName != "HyperPointer" {
+        if let app = NSRunningApplication(processIdentifier: pid) {
             hoveredAppPID = pid
             hoveredContextIcon = app.icon
         } else {
@@ -460,8 +460,6 @@ class SearchViewModel: ObservableObject {
         let app = NSRunningApplication(processIdentifier: pid)
         let appName = app?.localizedName ?? ""
         let bundleID = app?.bundleIdentifier ?? ""
-
-        if appName == "HyperPointer" { return "" }
 
         let isBrowser = browserBundleIDs.contains(bundleID)
 
