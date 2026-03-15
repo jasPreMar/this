@@ -310,7 +310,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func checkForUpdateInBackground() {
         let check = { [weak self] in
             guard let feedURLString = Bundle.main.infoDictionary?["SUFeedURL"] as? String,
-                  let feedURL = URL(string: feedURLString) else { return }
+                  var components = URLComponents(string: feedURLString) else { return }
+            // Cache-bust to bypass GitHub CDN caching
+            components.queryItems = [URLQueryItem(name: "t", value: "\(Int(Date().timeIntervalSince1970))")]
+            guard let feedURL = components.url else { return }
             let currentBuild = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "0"
             var request = URLRequest(url: feedURL)
             request.cachePolicy = .reloadIgnoringLocalCacheData

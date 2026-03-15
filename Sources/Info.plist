@@ -38,6 +38,8 @@
 	<string>HyperPointer converts your speech to text so you can dictate prompts hands-free.</string>
 	<key>SUEnableAutomaticChecks</key>
 	<true/>
+	<key>SUScheduledCheckInterval</key>
+	<integer>600</integer>
 	<key>SUFeedURL</key>
 	<string>https://raw.githubusercontent.com/jasPreMar/hyper-pointer/main/appcast.xml</string>
 	<key>SUPublicEDKey</key>
