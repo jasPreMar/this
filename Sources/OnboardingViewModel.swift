@@ -10,6 +10,7 @@ struct AutomationApp: Identifiable {
     let bundleIdentifier: String
     let icon: NSImage?
     let isGranted: Bool
+    let isRunning: Bool
 
     var id: String { bundleIdentifier }
 }
@@ -22,6 +23,8 @@ final class OnboardingViewModel: ObservableObject {
     @Published var microphoneStatus: AVAuthorizationStatus = .notDetermined
     @Published var speechStatus: SFSpeechRecognizerAuthorizationStatus = .notDetermined
     @Published var automationApps: [AutomationApp] = []
+    @Published var automationSearchQuery = ""
+    @Published var isLoadingAutomationApps = false
 
     private let onFinish: () -> Void
     private let onAccessibilityGranted: () -> Void
@@ -43,13 +46,23 @@ final class OnboardingViewModel: ObservableObject {
         !automationApps.isEmpty
     }
 
+    var filteredAutomationApps: [AutomationApp] {
+        let query = automationSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return automationApps }
+
+        return automationApps.filter { app in
+            app.name.localizedCaseInsensitiveContains(query) ||
+            app.bundleIdentifier.localizedCaseInsensitiveContains(query)
+        }
+    }
+
     func refresh() {
         isClaudeInstalled = resolveClaudeBinaryPath() != nil
         isAccessibilityGranted = AXIsProcessTrusted()
         isScreenRecordingGranted = CGPreflightScreenCaptureAccess()
         microphoneStatus = AVCaptureDevice.authorizationStatus(for: .audio)
         speechStatus = SFSpeechRecognizer.authorizationStatus()
-        automationApps = loadAutomationApps()
+        refreshAutomationApps()
     }
 
     func finish() {
@@ -102,7 +115,7 @@ final class OnboardingViewModel: ObservableObject {
     func requestAutomation(for app: AutomationApp) {
         _ = automationPermissionGranted(for: app.bundleIdentifier, askUserIfNeeded: true)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-            self.refresh()
+            self.refreshAutomationApps()
         }
     }
 
@@ -157,27 +170,86 @@ final class OnboardingViewModel: ObservableObject {
         }
     }
 
-    private func loadAutomationApps() -> [AutomationApp] {
-        let apps = NSWorkspace.shared.runningApplications
-            .filter {
-                $0.activationPolicy == .regular &&
-                $0.processIdentifier != ProcessInfo.processInfo.processIdentifier &&
-                ($0.bundleIdentifier?.isEmpty == false)
+    private func refreshAutomationApps() {
+        isLoadingAutomationApps = true
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            let apps = self.discoverInstalledApps()
+
+            DispatchQueue.main.async {
+                self.automationApps = apps
+                self.isLoadingAutomationApps = false
             }
-            .compactMap { app -> AutomationApp? in
-                guard let bundleIdentifier = app.bundleIdentifier else { return nil }
-                return AutomationApp(
-                    name: app.localizedName ?? bundleIdentifier,
-                    bundleIdentifier: bundleIdentifier,
-                    icon: app.icon,
-                    isGranted: automationPermissionGranted(for: bundleIdentifier, askUserIfNeeded: false)
-                )
-            }
-            .sorted { lhs, rhs in
-                lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+        }
+    }
+
+    private func discoverInstalledApps() -> [AutomationApp] {
+        let fileManager = FileManager.default
+        let runningBundleIdentifiers = Set(
+            NSWorkspace.shared.runningApplications.compactMap(\.bundleIdentifier)
+        )
+        let runningBundleURLs = NSWorkspace.shared.runningApplications.compactMap(\.bundleURL)
+        let appRoots = [
+            URL(fileURLWithPath: "/Applications", isDirectory: true),
+            URL(fileURLWithPath: "/Applications/Utilities", isDirectory: true),
+            URL(fileURLWithPath: "/System/Applications", isDirectory: true),
+            URL(fileURLWithPath: "/System/Applications/Utilities", isDirectory: true),
+            URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Applications", isDirectory: true)
+        ]
+
+        var results: [String: AutomationApp] = [:]
+        var visitedPaths = Set<String>()
+
+        for root in appRoots where fileManager.fileExists(atPath: root.path) {
+            guard let enumerator = fileManager.enumerator(
+                at: root,
+                includingPropertiesForKeys: [.isDirectoryKey, .isApplicationKey],
+                options: [.skipsHiddenFiles, .skipsPackageDescendants]
+            ) else {
+                continue
             }
 
-        return Array(Dictionary(grouping: apps, by: \.bundleIdentifier).compactMap { $0.value.first })
+            for case let url as URL in enumerator {
+                guard url.pathExtension == "app" else { continue }
+                visitedPaths.insert(url.path)
+
+                if let app = automationApp(at: url, runningBundleIdentifiers: runningBundleIdentifiers) {
+                    results[app.bundleIdentifier] = app
+                }
+            }
+        }
+
+        for url in runningBundleURLs where !visitedPaths.contains(url.path) {
+            if let app = automationApp(at: url, runningBundleIdentifiers: runningBundleIdentifiers) {
+                results[app.bundleIdentifier] = app
+            }
+        }
+
+        return results.values.sorted { lhs, rhs in
+            lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+        }
+    }
+
+    private func automationApp(at url: URL, runningBundleIdentifiers: Set<String>) -> AutomationApp? {
+        guard let bundle = Bundle(url: url),
+              let bundleIdentifier = bundle.bundleIdentifier,
+              bundleIdentifier != Bundle.main.bundleIdentifier else {
+            return nil
+        }
+
+        let name = bundle.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String ??
+            bundle.object(forInfoDictionaryKey: "CFBundleName") as? String ??
+            url.deletingPathExtension().lastPathComponent
+
+        let icon = NSWorkspace.shared.icon(forFile: url.path)
+
+        return AutomationApp(
+            name: name,
+            bundleIdentifier: bundleIdentifier,
+            icon: icon,
+            isGranted: automationPermissionGranted(for: bundleIdentifier, askUserIfNeeded: false),
+            isRunning: runningBundleIdentifiers.contains(bundleIdentifier)
+        )
     }
 
     private func openSettings(anchor: String) {

@@ -78,7 +78,7 @@ struct OnboardingView: View {
                 )
                 SummaryBadge(
                     title: "Automation Apps",
-                    value: viewModel.hasAutomationTargets ? "\(viewModel.automationApps.count) found" : "Open apps to preload",
+                    value: viewModel.hasAutomationTargets ? "\(viewModel.automationApps.count) found" : "Scanning installed apps",
                     isReady: viewModel.hasAutomationTargets
                 )
             }
@@ -329,16 +329,40 @@ private struct AutomationStep: View {
                     }
                     .buttonStyle(.link)
 
-                    Text("Only open apps are listed here.")
+                    Text("Every installed app is listed here. Running apps get an extra badge.")
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)
                 }
 
-                if viewModel.automationApps.isEmpty {
+                TextField("Search apps", text: $viewModel.automationSearchQuery)
+                    .textFieldStyle(.roundedBorder)
+
+                if viewModel.isLoadingAutomationApps {
+                    HStack(spacing: 10) {
+                        ProgressView()
+                            .controlSize(.small)
+                        Text("Scanning installed applications…")
+                            .font(.system(size: 13))
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.vertical, 4)
+                } else if viewModel.automationApps.isEmpty {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("No eligible apps are open")
+                        Text("No applications were found")
                             .font(.system(size: 16, weight: .semibold))
-                        Text("Launch Safari, Finder, Terminal, VS Code, or any other app you expect HyperPointer to control, then refresh this list.")
+                        Text("Use Refresh List to rescan the standard Applications folders if the install changed while this window was open.")
+                            .font(.system(size: 13))
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(18)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.secondary.opacity(0.08))
+                    .clipShape(RoundedRectangle(cornerRadius: 14))
+                } else if viewModel.filteredAutomationApps.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("No apps match that search")
+                            .font(.system(size: 16, weight: .semibold))
+                        Text("Try a shorter app name or search by bundle identifier.")
                             .font(.system(size: 13))
                             .foregroundStyle(.secondary)
                     }
@@ -348,7 +372,7 @@ private struct AutomationStep: View {
                     .clipShape(RoundedRectangle(cornerRadius: 14))
                 } else {
                     VStack(spacing: 12) {
-                        ForEach(viewModel.automationApps) { app in
+                        ForEach(viewModel.filteredAutomationApps) { app in
                             AutomationAppRow(app: app) {
                                 viewModel.requestAutomation(for: app)
                             }
@@ -474,6 +498,9 @@ private struct AutomationAppRow: View {
 
             Spacer()
 
+            if app.isRunning {
+                SetupStatusPill(text: "Open", isReady: true)
+            }
             SetupStatusPill(text: app.isGranted ? "Ready" : "Pending", isReady: app.isGranted)
 
             Button(app.isGranted ? "Retry" : "Allow", action: action)
