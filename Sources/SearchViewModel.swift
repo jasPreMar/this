@@ -26,6 +26,12 @@ class SearchViewModel: ObservableObject {
     var onContentSizeChange: ((CGSize) -> Void)?
     private var hoveredAppPID: pid_t = 0
 
+    // Stale accessibility tree detection
+    private var lastCursorPosition: CGPoint = .zero
+    private var consecutiveContainerResults: Int = 0
+    private var lastContainerRole: String = ""
+    private let staleThreshold = 3
+
     /// Set by FloatingPanel
     var onSubmit: ((String, URL?) -> Void)?
     var onClose: (() -> Void)?
@@ -208,21 +214,54 @@ class SearchViewModel: ObservableObject {
         guard let screen = NSScreen.main else { return }
         let cgPoint = CGPoint(x: mouseLocation.x, y: screen.frame.height - mouseLocation.y)
 
-        // Use Accessibility API to get the element under the cursor
-        let systemWide = AXUIElementCreateSystemWide()
-        var element: AXUIElement?
-        let result = AXUIElementCopyElementAtPosition(systemWide, Float(cgPoint.x), Float(cgPoint.y), &element)
+        let cursorMoved = cgPoint != lastCursorPosition
+        lastCursorPosition = cgPoint
 
-        guard result == .success, let element = element else {
+        // Use Accessibility API to get the element under the cursor
+        var systemWide = AXUIElementCreateSystemWide()
+        var element: AXUIElement?
+        var result = AXUIElementCopyElementAtPosition(systemWide, Float(cgPoint.x), Float(cgPoint.y), &element)
+
+        guard result == .success, let rawElement = element else {
             hoveredApp = ""
             hoveredParts = []
             hoveredContextIcon = nil
+            consecutiveContainerResults = 0
+            lastContainerRole = ""
             return
+        }
+
+        // Detect stale accessibility tree: if cursor is moving but we keep getting
+        // the same container-level role, force a fresh query by recreating systemWide
+        var resolvedElement = rawElement
+        if cursorMoved {
+            let role = axValue(rawElement, key: kAXRoleAttribute) as? String ?? ""
+            if containerRoles.contains(role) && role == lastContainerRole {
+                consecutiveContainerResults += 1
+                if consecutiveContainerResults >= staleThreshold {
+                    // Force a fresh accessibility query
+                    systemWide = AXUIElementCreateSystemWide()
+                    element = nil
+                    result = AXUIElementCopyElementAtPosition(systemWide, Float(cgPoint.x), Float(cgPoint.y), &element)
+                    if result == .success, let freshElement = element {
+                        resolvedElement = freshElement
+                    }
+                    consecutiveContainerResults = 0
+                }
+            } else if containerRoles.contains(role) {
+                // New container role — start tracking
+                consecutiveContainerResults = 1
+                lastContainerRole = role
+            } else {
+                // Got a non-container result — reset tracking
+                consecutiveContainerResults = 0
+                lastContainerRole = ""
+            }
         }
 
         // Store the PID of the hovered app for screenshot use
         var pid: pid_t = 0
-        AXUIElementGetPid(element, &pid)
+        AXUIElementGetPid(resolvedElement, &pid)
         if let app = NSRunningApplication(processIdentifier: pid), app.localizedName != "HyperPointer" {
             hoveredAppPID = pid
             hoveredContextIcon = app.icon
@@ -231,14 +270,14 @@ class SearchViewModel: ObservableObject {
         }
 
         // Build a description from the element hierarchy
-        let description = describeElement(element)
+        let description = describeElement(resolvedElement)
         if hoveredApp != description {
             hoveredApp = description
             hoveredParts = description.isEmpty ? [] : description.components(separatedBy: " → ")
         }
 
         // Check for selected/highlighted text
-        let sel = getSelectedText(element: element)
+        let sel = getSelectedText(element: resolvedElement)
         if selectedText != sel {
             selectedText = sel
         }
@@ -360,8 +399,11 @@ class SearchViewModel: ObservableObject {
             return (element, collectAncestors(above: element))
         }
 
-        // Fall back to the container if we found one
+        // Fall back to the container if we found one, but first try to find a more specific child
         if let container = bestContainer {
+            if let betterChild = findBestChild(in: container) {
+                return (betterChild, collectAncestors(above: betterChild))
+            }
             return (container, collectAncestors(above: container))
         }
 
@@ -382,6 +424,34 @@ class SearchViewModel: ObservableObject {
             current = parentEl
         }
         return ancestors
+    }
+
+    /// Search children of a container for a more specific primary-role element.
+    /// Caps recursion at 3 levels to avoid performance issues.
+    private func findBestChild(in container: AXUIElement, depth: Int = 0) -> AXUIElement? {
+        guard depth < 3,
+              let children = axValue(container, key: kAXChildrenAttribute) as? [AXUIElement]
+        else { return nil }
+
+        // First pass: look for a direct child with a primary role
+        for child in children.prefix(20) {
+            let role = axValue(child, key: kAXRoleAttribute) as? String ?? ""
+            if primaryRoles.contains(role) {
+                return child
+            }
+        }
+
+        // Second pass: recurse into container children
+        for child in children.prefix(20) {
+            let role = axValue(child, key: kAXRoleAttribute) as? String ?? ""
+            if containerRoles.contains(role) {
+                if let found = findBestChild(in: child, depth: depth + 1) {
+                    return found
+                }
+            }
+        }
+
+        return nil
     }
 
     private func describeElement(_ element: AXUIElement) -> String {
