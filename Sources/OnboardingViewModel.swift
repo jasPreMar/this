@@ -180,6 +180,29 @@ final class OnboardingViewModel: ObservableObject {
                 self.automationApps = apps
                 self.isLoadingAutomationApps = false
             }
+
+            // Check permissions in the background after the list is visible
+            self.resolvePermissionsInBackground(for: apps)
+        }
+    }
+
+    private func resolvePermissionsInBackground(for apps: [AutomationApp]) {
+        DispatchQueue.global(qos: .utility).async {
+            var updated: [AutomationApp] = []
+            for app in apps {
+                let granted = self.automationPermissionGranted(for: app.bundleIdentifier, askUserIfNeeded: false)
+                updated.append(AutomationApp(
+                    name: app.name,
+                    bundleIdentifier: app.bundleIdentifier,
+                    icon: app.icon,
+                    isGranted: granted,
+                    isRunning: app.isRunning
+                ))
+            }
+
+            DispatchQueue.main.async {
+                self.automationApps = updated
+            }
         }
     }
 
@@ -247,7 +270,7 @@ final class OnboardingViewModel: ObservableObject {
             name: name,
             bundleIdentifier: bundleIdentifier,
             icon: icon,
-            isGranted: automationPermissionGranted(for: bundleIdentifier, askUserIfNeeded: false),
+            isGranted: false,
             isRunning: runningBundleIdentifiers.contains(bundleIdentifier)
         )
     }
