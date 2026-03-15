@@ -1,8 +1,6 @@
 import AppKit
 import SwiftUI
 import ApplicationServices
-import AVFoundation
-import Speech
 import Sparkle
 
 // Global reference for CGEventTap callback (C function pointers can't capture context)
@@ -55,17 +53,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var flagsMonitor: Any?
     private var localFlagsMonitor: Any?
     private var statusItem: NSStatusItem?
+    private var onboardingWindow: NSWindow?
     private var commandKeyHeld = false
     private weak var commandKeyPanel: FloatingPanel?
     private var updaterController: SPUStandardUpdaterController?
+    private let onboardingSeenKey = "hasShownOnboarding"
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         sharedAppDelegate = self
         setupMainMenu()
         updaterController = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: nil, userDriverDelegate: nil)
         setupStatusItem()
-        requestInitialPermissions()
-        setupRightClickTap()
+        setupRightClickTapIfNeeded()
+        showOnboardingIfNeeded()
 
         // Global hotkey: Control + Space to create new panel
         hotKeyMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
@@ -171,6 +171,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let checkForUpdatesItem = NSMenuItem(title: "Check for Updates…", action: #selector(SPUStandardUpdaterController.checkForUpdates(_:)), keyEquivalent: "")
         checkForUpdatesItem.target = updaterController
 
+        let onboardingItem = NSMenuItem(title: "Open Onboarding", action: #selector(handleStatusOpenOnboarding), keyEquivalent: ",")
+        onboardingItem.target = self
+
         let quitItem = NSMenuItem(title: "Quit HyperPointer", action: #selector(handleStatusQuit), keyEquivalent: "q")
         quitItem.target = self
 
@@ -178,6 +181,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(versionItem)
         menu.addItem(.separator())
         menu.addItem(newPanelItem)
+        menu.addItem(onboardingItem)
         menu.addItem(.separator())
         menu.addItem(checkForUpdatesItem)
         menu.addItem(.separator())
@@ -191,76 +195,67 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         createNewPanel()
     }
 
+    @objc private func handleStatusOpenOnboarding() {
+        showOnboarding(force: true)
+    }
+
     @objc private func handleStatusQuit() {
         NSApp.terminate(nil)
     }
 
-    // MARK: - Permission Setup
+    private func showOnboardingIfNeeded() {
+        if !UserDefaults.standard.bool(forKey: onboardingSeenKey) {
+            showOnboarding()
+        }
+    }
 
-    /// Pre-request all permissions HyperPointer needs so macOS dialogs appear upfront
-    /// rather than surprising the user mid-task when Claude runs a shell command.
-    private func requestInitialPermissions() {
-        // 1. Accessibility — required for the CGEventTap and Accessibility API.
-        //    If not yet granted, this prompts the user and opens System Settings.
-        let options = [kAXTrustedCheckOptionPrompt.takeRetainedValue(): true] as CFDictionary
-        _ = AXIsProcessTrustedWithOptions(options)
-
-        // 2. Screen Recording — required for window screenshots.
-        if !CGPreflightScreenCaptureAccess() {
-            CGRequestScreenCaptureAccess()
+    private func showOnboarding(force: Bool = false) {
+        if let onboardingWindow {
+            onboardingWindow.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
         }
 
-        // 3. Voice input permissions — required for Shift-to-dictate.
-        AVCaptureDevice.requestAccess(for: .audio) { granted in
-            guard granted else { return }
-            SFSpeechRecognizer.requestAuthorization { _ in }
+        if !force && UserDefaults.standard.bool(forKey: onboardingSeenKey) {
+            return
         }
 
-        // 4. Apple Events (Automation) — required when Claude runs `osascript` to control
-        //    other apps. Pre-warm all foreground apps currently running, and observe any
-        //    app that launches later. TCC only shows a dialog once per app pair; after
-        //    Allow is clicked it's remembered forever.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            self.preWarmAllRunningApps()
-        }
-        NSWorkspace.shared.notificationCenter.addObserver(
-            self,
-            selector: #selector(appDidLaunch(_:)),
-            name: NSWorkspace.didLaunchApplicationNotification,
-            object: nil
+        let viewModel = OnboardingViewModel(
+            onFinish: { [weak self] in
+                guard let self else { return }
+                UserDefaults.standard.set(true, forKey: self.onboardingSeenKey)
+                self.closeOnboarding()
+            },
+            onAccessibilityGranted: { [weak self] in
+                self?.setupRightClickTapIfNeeded()
+            }
         )
+
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 760, height: 560),
+            styleMask: [.titled, .closable, .miniaturizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = "HyperPointer Setup"
+        window.isReleasedWhenClosed = false
+        window.center()
+        window.contentView = NSHostingView(rootView: OnboardingView(viewModel: viewModel))
+        window.delegate = self
+
+        onboardingWindow = window
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
     }
 
-    private func preWarmAllRunningApps() {
-        for app in NSWorkspace.shared.runningApplications {
-            guard app.activationPolicy == .regular,
-                  let bundleID = app.bundleIdentifier,
-                  app.processIdentifier != ProcessInfo.processInfo.processIdentifier else { continue }
-            preWarmAppleEventsPermission(for: bundleID)
-        }
+    private func closeOnboarding() {
+        onboardingWindow?.orderOut(nil)
+        onboardingWindow = nil
     }
 
-    @objc private func appDidLaunch(_ notification: Notification) {
-        guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
-              app.activationPolicy == .regular,
-              let bundleID = app.bundleIdentifier,
-              app.processIdentifier != ProcessInfo.processInfo.processIdentifier else { return }
-        preWarmAppleEventsPermission(for: bundleID)
-    }
-
-    /// Triggers the macOS Automation permission dialog for `bundleID` if not already granted.
-    /// Uses `AEDeterminePermissionToAutomateTarget` with `askUserIfNeeded: true`.
-    /// The target app does not need to be running — TCC grants permissions by bundle ID pair.
-    private func preWarmAppleEventsPermission(for bundleID: String) {
-        // typeApplicationBundleID = 'bund' (OSType 0x62756E64)
-        let bundDescType: OSType = 0x62756E64
-        bundleID.withCString { cStr in
-            var targetDesc = AEDesc()
-            guard AECreateDesc(bundDescType, cStr, bundleID.utf8.count, &targetDesc) == noErr else { return }
-            // typeWildCard = '****' — request permission for any event class/ID
-            AEDeterminePermissionToAutomateTarget(&targetDesc, OSType(0x2A2A2A2A), OSType(0x2A2A2A2A), true)
-            AEDisposeDesc(&targetDesc)
-        }
+    private func setupRightClickTapIfNeeded() {
+        guard eventTap == nil, AXIsProcessTrusted() else { return }
+        setupRightClickTap()
     }
 
     private func setupRightClickTap() {
@@ -303,5 +298,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let panel = FloatingPanel()
         panels.append(panel)
         panel.show(at: point)
+    }
+}
+
+extension AppDelegate: NSWindowDelegate {
+    func windowWillClose(_ notification: Notification) {
+        guard let window = notification.object as? NSWindow, window == onboardingWindow else {
+            return
+        }
+        onboardingWindow = nil
+        UserDefaults.standard.set(true, forKey: onboardingSeenKey)
     }
 }

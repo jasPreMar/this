@@ -58,7 +58,7 @@ class ClaudeProcessManager: ObservableObject {
         buffer = Data()
 
 
-        guard let claudePath = resolveClaudePath() else {
+        guard let claudePath = resolveClaudeBinaryPath() else {
             status = .error("Could not find 'claude' binary")
             return
         }
@@ -313,35 +313,6 @@ class ClaudeProcessManager: ObservableObject {
 
         return nil
     }
-
-
-    private func resolveClaudePath() -> String? {
-        let candidates = [
-            "/usr/local/bin/claude",
-            "/opt/homebrew/bin/claude",
-            NSHomeDirectory() + "/.local/bin/claude"
-        ]
-        for path in candidates {
-            if FileManager.default.isExecutableFile(atPath: path) {
-                return path
-            }
-        }
-        // Fallback: use zsh to resolve
-        let which = Process()
-        which.executableURL = URL(fileURLWithPath: "/bin/zsh")
-        which.arguments = ["-lc", "which claude"]
-        let pipe = Pipe()
-        which.standardOutput = pipe
-        try? which.run()
-        which.waitUntilExit()
-        let result = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        if let path = result, !path.isEmpty, FileManager.default.isExecutableFile(atPath: path) {
-            return path
-        }
-        return nil
-    }
-
     func stop() {
         isStopped = true
         if let proc = process {
@@ -853,4 +824,3 @@ struct ChatView: View {
         .padding(.vertical, 8)
     }
 }
-

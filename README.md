@@ -55,9 +55,19 @@ HyperPointer removes that step:
 
 - macOS 14.0+ (Sonoma)
 - [Claude CLI](https://github.com/anthropics/claude-code) installed
-- Accessibility permissions granted to the app
+- Accessibility and Screen Recording permissions granted to the app
 
 ## Setup
+
+To install the latest released build from the terminal:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/jasPreMar/hyper-pointer/main/scripts/install.sh | bash
+```
+
+That downloads the latest DMG from GitHub Releases, installs `HyperPointer.app`, opens it, and launches the onboarding wizard.
+
+To build from source:
 
 ```bash
 git clone https://github.com/jasPreMar/hyper-pointer.git
@@ -93,7 +103,15 @@ make dmg
 open dist/HyperPointer.dmg
 ```
 
-On first launch, macOS will prompt you to grant Accessibility and Screen Recording permissions. It will also show Automation permission dialogs for any apps currently running — click Allow for each. These are one-time prompts; macOS remembers your choices permanently.
+On first launch, HyperPointer opens an onboarding wizard that walks through:
+
+- Installing or verifying Claude CLI
+- Accessibility
+- Screen Recording
+- Optional microphone and speech permissions for dictation
+- Optional Automation approvals for the apps you want HyperPointer to control
+
+You can reopen the wizard any time from the menu bar item with `Open Onboarding`.
 
 To skip all permission dialogs entirely, run once after building:
 
