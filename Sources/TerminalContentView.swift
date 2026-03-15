@@ -813,7 +813,6 @@ struct ChatView: View {
     @ObservedObject var viewModel: SearchViewModel
     @State private var textWidth: CGFloat = FocusedTextField.minWidth
     @State private var textHeight: CGFloat = 18
-    @State private var headerDragOffset: CGSize = .zero
     private let fixedChatHeight: CGFloat = 360
 
     private var hasContextRow: Bool {
@@ -823,44 +822,26 @@ struct ChatView: View {
     var body: some View {
         PanelSurface(fixedHeight: fixedChatHeight) {
             VStack(spacing: 0) {
-                Group {
-                    if hasContextRow {
-                        PanelHeaderSection(
-                            viewModel: viewModel,
-                            showsCloseButtonOnHover: true,
-                            onClose: viewModel.onClose
-                        )
-                    } else {
-                        VStack(spacing: 0) {
-                            if !viewModel.selectedText.isEmpty {
-                                PanelHeaderSection(viewModel: viewModel)
+                if hasContextRow {
+                    PanelHeaderSection(
+                        viewModel: viewModel,
+                        showsCloseButtonOnHover: true,
+                        onClose: viewModel.onClose
+                    )
+                    .overlay(DragArea())
+                } else {
+                    if !viewModel.selectedText.isEmpty {
+                        PanelHeaderSection(viewModel: viewModel)
 
-                                Divider()
-                                    .padding(.horizontal, 8)
-                            }
-
-                            ChatCloseRow(viewModel: viewModel)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 7)
-                        }
+                        Divider()
+                            .padding(.horizontal, 8)
                     }
+
+                    ChatCloseRow(viewModel: viewModel)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 7)
+                    .overlay(DragArea())
                 }
-                .gesture(
-                    DragGesture(minimumDistance: 3)
-                        .onChanged { value in
-                            guard let window = NSApp.keyWindow else { return }
-                            let delta = CGSize(
-                                width: value.translation.width - headerDragOffset.width,
-                                height: value.translation.height - headerDragOffset.height
-                            )
-                            headerDragOffset = value.translation
-                            window.setFrameOrigin(NSPoint(
-                                x: window.frame.origin.x + delta.width,
-                                y: window.frame.origin.y - delta.height
-                            ))
-                        }
-                        .onEnded { _ in headerDragOffset = .zero }
-                )
 
                 Divider()
                     .padding(.horizontal, 8)
@@ -970,3 +951,43 @@ private struct ChatCloseRow: View {
     }
 }
 
+// MARK: - Drag Area (makes the header draggable via native window drag)
+
+struct DragArea: NSViewRepresentable {
+    func makeNSView(context: Context) -> DragView {
+        let view = DragView()
+        view.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        view.setContentHuggingPriority(.defaultLow, for: .vertical)
+        return view
+    }
+    func updateNSView(_ nsView: DragView, context: Context) {}
+}
+
+class DragView: NSView {
+    override func mouseDown(with event: NSEvent) {
+        window?.performDrag(with: event)
+    }
+
+    /// Pass through clicks that land on an interactive control (e.g. the close button)
+    /// so those controls can still receive their events. Drags anywhere else in the
+    /// overlay initiate native window dragging via mouseDown.
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        // `point` is in the superview's coordinate system.
+        guard let superview = superview else { return super.hitTest(point) }
+        for sibling in superview.subviews where sibling !== self {
+            if let hit = sibling.hitTest(point), hasInteractiveAncestor(hit, stopAt: superview) {
+                return nil
+            }
+        }
+        return super.hitTest(point)
+    }
+
+    private func hasInteractiveAncestor(_ view: NSView, stopAt limit: NSView) -> Bool {
+        var current: NSView? = view
+        while let v = current, v !== limit {
+            if v is NSControl || v is NSTextView { return true }
+            current = v.superview
+        }
+        return false
+    }
+}
