@@ -212,14 +212,15 @@ class FloatingPanel: NSPanel {
         setFrameOrigin(nextOrigin)
 
         // Switch to chat mode — the PanelContentView handles the rest
-        searchViewModel.chatHistory.append((role: "user", text: searchViewModel.query))
+        searchViewModel.chatHistory.append((role: "user", text: searchViewModel.query, events: []))
         searchViewModel.query = ""
 
         let manager = ClaudeProcessManager()
         manager.onComplete = { [weak self] response in
-            // Clear streaming text before appending to history to avoid duplicate display
+            let completedEvents = manager.events
             manager.outputText = ""
-            self?.searchViewModel.chatHistory.append((role: "assistant", text: response))
+            manager.events = []
+            self?.searchViewModel.chatHistory.append((role: "assistant", text: response, events: completedEvents))
             // Capture session ID for follow-up messages
             if let sid = manager.sessionId {
                 self?.searchViewModel.currentSessionId = sid

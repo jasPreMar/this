@@ -520,18 +520,19 @@ struct ToolCallEventRow: View {
 // MARK: - Events Summary View
 
 struct EventsSummaryView: View {
-    @ObservedObject var manager: ClaudeProcessManager
+    let events: [StreamEvent]
+    let isDone: Bool
     @State private var isExpanded = false
 
     private var toolCallCount: Int {
-        manager.events.filter {
+        events.filter {
             if case .toolCall = $0 { return true }
             return false
         }.count
     }
 
     private var messageCount: Int {
-        manager.events.filter {
+        events.filter {
             if case .thinking = $0 { return true }
             return false
         }.count
@@ -549,9 +550,9 @@ struct EventsSummaryView: View {
     }
 
     var body: some View {
-        if manager.events.isEmpty {
+        if events.isEmpty {
             EmptyView()
-        } else if manager.status == .done {
+        } else if isDone {
             // Collapsed summary with expand/collapse toggle
             VStack(alignment: .leading, spacing: 4) {
                 Button(action: { withAnimation(.easeInOut(duration: 0.2)) { isExpanded.toggle() } }) {
@@ -573,14 +574,14 @@ struct EventsSummaryView: View {
                 .buttonStyle(.plain)
 
                 if isExpanded {
-                    ForEach(manager.events) { event in
+                    ForEach(events) { event in
                         eventRow(for: event)
                     }
                 }
             }
         } else {
             // Live streaming — show all events individually
-            ForEach(manager.events) { event in
+            ForEach(events) { event in
                 eventRow(for: event)
             }
         }
@@ -826,12 +827,13 @@ struct ChatView: View {
                         .font(.system(size: 12, design: .monospaced))
                         .foregroundColor(.secondary)
                 } else {
+                    EventsSummaryView(events: entry.events, isDone: true)
                     AssistantMarkdown(text: entry.text)
                 }
             }
 
             if let manager = viewModel.claudeManager {
-                EventsSummaryView(manager: manager)
+                EventsSummaryView(events: manager.events, isDone: manager.status == .done)
             }
 
             if let manager = viewModel.claudeManager,
