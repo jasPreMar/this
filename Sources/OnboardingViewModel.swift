@@ -6,11 +6,17 @@ import Combine
 import Speech
 
 struct AutomationApp: Identifiable {
+    enum PermissionStatus {
+        case unknown
+        case pending
+        case ready
+    }
+
     let name: String
     let bundleIdentifier: String
     let icon: NSImage?
-    let isGranted: Bool
     let isRunning: Bool
+    let permissionStatus: PermissionStatus
 
     var id: String { bundleIdentifier }
 }
@@ -28,6 +34,7 @@ final class OnboardingViewModel: ObservableObject {
 
     private let onFinish: () -> Void
     private let onAccessibilityGranted: () -> Void
+    private var automationPermissionOverrides: [String: AutomationApp.PermissionStatus] = [:]
 
     init(
         onFinish: @escaping () -> Void,
@@ -115,6 +122,8 @@ final class OnboardingViewModel: ObservableObject {
     func requestAutomation(for app: AutomationApp) {
         _ = automationPermissionGranted(for: app.bundleIdentifier, askUserIfNeeded: true)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            let isGranted = self.automationPermissionGranted(for: app.bundleIdentifier, askUserIfNeeded: false)
+            self.automationPermissionOverrides[app.bundleIdentifier] = isGranted ? .ready : .pending
             self.refreshAutomationApps()
         }
     }
@@ -172,9 +181,10 @@ final class OnboardingViewModel: ObservableObject {
 
     private func refreshAutomationApps() {
         isLoadingAutomationApps = true
+        let permissionOverrides = automationPermissionOverrides
 
         DispatchQueue.global(qos: .userInitiated).async {
-            let apps = self.discoverInstalledApps()
+            let apps = self.discoverInstalledApps(permissionOverrides: permissionOverrides)
 
             DispatchQueue.main.async {
                 self.automationApps = apps
@@ -183,7 +193,7 @@ final class OnboardingViewModel: ObservableObject {
         }
     }
 
-    private func discoverInstalledApps() -> [AutomationApp] {
+    private func discoverInstalledApps(permissionOverrides: [String: AutomationApp.PermissionStatus]) -> [AutomationApp] {
         let fileManager = FileManager.default
         let runningBundleIdentifiers = Set(
             NSWorkspace.shared.runningApplications.compactMap(\.bundleIdentifier)
@@ -213,14 +223,22 @@ final class OnboardingViewModel: ObservableObject {
                 guard url.pathExtension == "app" else { continue }
                 visitedPaths.insert(url.path)
 
-                if let app = automationApp(at: url, runningBundleIdentifiers: runningBundleIdentifiers) {
+                if let app = automationApp(
+                    at: url,
+                    runningBundleIdentifiers: runningBundleIdentifiers,
+                    permissionOverrides: permissionOverrides
+                ) {
                     results[app.bundleIdentifier] = app
                 }
             }
         }
 
         for url in runningBundleURLs where !visitedPaths.contains(url.path) {
-            if let app = automationApp(at: url, runningBundleIdentifiers: runningBundleIdentifiers) {
+            if let app = automationApp(
+                at: url,
+                runningBundleIdentifiers: runningBundleIdentifiers,
+                permissionOverrides: permissionOverrides
+            ) {
                 results[app.bundleIdentifier] = app
             }
         }
@@ -230,7 +248,11 @@ final class OnboardingViewModel: ObservableObject {
         }
     }
 
-    private func automationApp(at url: URL, runningBundleIdentifiers: Set<String>) -> AutomationApp? {
+    private func automationApp(
+        at url: URL,
+        runningBundleIdentifiers: Set<String>,
+        permissionOverrides: [String: AutomationApp.PermissionStatus]
+    ) -> AutomationApp? {
         guard let bundle = Bundle(url: url),
               let bundleIdentifier = bundle.bundleIdentifier,
               bundleIdentifier != Bundle.main.bundleIdentifier else {
@@ -247,8 +269,8 @@ final class OnboardingViewModel: ObservableObject {
             name: name,
             bundleIdentifier: bundleIdentifier,
             icon: icon,
-            isGranted: automationPermissionGranted(for: bundleIdentifier, askUserIfNeeded: false),
-            isRunning: runningBundleIdentifiers.contains(bundleIdentifier)
+            isRunning: runningBundleIdentifiers.contains(bundleIdentifier),
+            permissionStatus: permissionOverrides[bundleIdentifier] ?? .unknown
         )
     }
 

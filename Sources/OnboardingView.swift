@@ -501,9 +501,16 @@ private struct AutomationAppRow: View {
             if app.isRunning {
                 SetupStatusPill(text: "Open", isReady: true)
             }
-            SetupStatusPill(text: app.isGranted ? "Ready" : "Pending", isReady: app.isGranted)
+            switch app.permissionStatus {
+            case .unknown:
+                EmptyView()
+            case .pending:
+                SetupStatusPill(text: "Pending", isReady: false)
+            case .ready:
+                SetupStatusPill(text: "Ready", isReady: true)
+            }
 
-            Button(app.isGranted ? "Retry" : "Allow", action: action)
+            Button(app.permissionStatus == .ready ? "Retry" : "Allow", action: action)
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
