@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct OnboardingView: View {
@@ -7,7 +8,7 @@ struct OnboardingView: View {
         "Welcome",
         "Permissions",
         "Automation",
-        "Finish"
+        "Try it"
     ]
 
     var body: some View {
@@ -385,74 +386,265 @@ private struct AutomationStep: View {
     }
 }
 
+// MARK: - Interactive Tutorial
+
+private enum TutorialPhase: Equatable {
+    case holdCommand
+    case exploring
+    case hovering
+    case dwelled
+    case released
+}
+
+private struct ToyItem: Identifiable {
+    let id = UUID()
+    let name: String
+    let icon: String
+    let examplePrompt: String
+}
+
+private class TutorialState: ObservableObject {
+    @Published var phase: TutorialPhase = .holdCommand
+    @Published var hoveredItem: ToyItem?
+    @Published var selectedItem: ToyItem?
+    private var localMonitor: Any?
+    private var globalMonitor: Any?
+    private var dwellTimer: Timer?
+
+    let items: [ToyItem] = [
+        ToyItem(name: "Documents", icon: "folder.fill", examplePrompt: "List recent files"),
+        ToyItem(name: "Downloads", icon: "folder.fill", examplePrompt: "Clean up old downloads"),
+        ToyItem(name: "Projects", icon: "folder.fill", examplePrompt: "Show git status"),
+        ToyItem(name: "notes.txt", icon: "doc.text.fill", examplePrompt: "Summarize this"),
+        ToyItem(name: "screenshot.png", icon: "photo.fill", examplePrompt: "What's in this image?"),
+        ToyItem(name: "budget.csv", icon: "tablecells", examplePrompt: "Chart Q1 expenses"),
+    ]
+
+    func start() {
+        localMonitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
+            self?.handleFlags(event)
+            return event
+        }
+        globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
+            self?.handleFlags(event)
+        }
+    }
+
+    func stop() {
+        if let m = localMonitor { NSEvent.removeMonitor(m) }
+        if let m = globalMonitor { NSEvent.removeMonitor(m) }
+        localMonitor = nil
+        globalMonitor = nil
+        dwellTimer?.invalidate()
+    }
+
+    private func handleFlags(_ event: NSEvent) {
+        let commandDown = event.modifierFlags.contains(.command)
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            switch self.phase {
+            case .holdCommand:
+                if commandDown { self.phase = .exploring }
+            case .exploring, .hovering:
+                if !commandDown {
+                    self.dwellTimer?.invalidate()
+                    self.phase = .holdCommand
+                    self.hoveredItem = nil
+                }
+            case .dwelled:
+                if !commandDown {
+                    self.selectedItem = self.hoveredItem
+                    self.phase = .released
+                }
+            case .released:
+                break
+            }
+        }
+    }
+
+    func itemHovered(_ item: ToyItem) {
+        guard phase == .exploring || phase == .hovering else { return }
+        hoveredItem = item
+        phase = .hovering
+        dwellTimer?.invalidate()
+        dwellTimer = Timer.scheduledTimer(withTimeInterval: 0.8, repeats: false) { [weak self] _ in
+            DispatchQueue.main.async {
+                guard let self, self.phase == .hovering else { return }
+                self.phase = .dwelled
+            }
+        }
+    }
+
+    func itemUnhovered() {
+        guard phase == .hovering else { return }
+        dwellTimer?.invalidate()
+        hoveredItem = nil
+        phase = .exploring
+    }
+
+    deinit { stop() }
+}
+
 private struct FinishStep: View {
     @ObservedObject var viewModel: OnboardingViewModel
+    @StateObject private var tutorial = TutorialState()
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                Text("Ready to test")
-                    .font(.system(size: 30, weight: .semibold))
+        ZStack {
+            if tutorial.phase == .holdCommand {
+                holdCommandView
+                    .transition(.opacity)
+            } else {
+                desktopView
+                    .transition(.opacity)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .animation(.easeOut(duration: 0.3), value: tutorial.phase)
+        .animation(.easeOut(duration: 0.15), value: tutorial.hoveredItem?.id)
+        .onAppear { tutorial.start() }
+        .onDisappear { tutorial.stop() }
+    }
 
-                Text("You can reopen this wizard any time from the HyperPointer menu bar item if you want to finish the optional voice permissions or preload more Automation targets.")
-                    .font(.system(size: 14))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+    // MARK: - Hold Command Phase
 
-                VStack(alignment: .leading, spacing: 14) {
-                    finishRow("Claude CLI", ready: viewModel.isClaudeInstalled)
-                    finishRow("Accessibility", ready: viewModel.isAccessibilityGranted)
-                    finishRow("Screen Recording", ready: viewModel.isScreenRecordingGranted)
-                    finishRow("Voice input", ready: viewModel.microphoneStatus == .authorized && viewModel.speechStatus == .authorized)
+    private var holdCommandView: some View {
+        VStack(spacing: 16) {
+            Spacer()
+            Text("\u{2318}")
+                .font(.system(size: 56, weight: .medium, design: .rounded))
+                .foregroundStyle(.tertiary)
+            Text("Hold command")
+                .font(.system(size: 24, weight: .semibold))
+            Text("You should see a little icon appear next to your cursor.")
+                .font(.system(size: 14))
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+            Spacer()
+        }
+        .frame(maxWidth: .infinity)
+        .padding(28)
+    }
+
+    // MARK: - Toy Desktop Phase
+
+    private var desktopView: some View {
+        VStack(spacing: 0) {
+            Spacer(minLength: 12)
+
+            // Mock Finder window
+            VStack(spacing: 0) {
+                // Title bar
+                HStack(spacing: 8) {
+                    Circle().fill(Color.red.opacity(0.7)).frame(width: 12, height: 12)
+                    Circle().fill(Color.yellow.opacity(0.7)).frame(width: 12, height: 12)
+                    Circle().fill(Color.green.opacity(0.7)).frame(width: 12, height: 12)
+                    Spacer()
+                    Text("Home")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.4))
+                    Spacer()
+                    Color.clear.frame(width: 44, height: 12)
                 }
-                .padding(20)
-                .background(Color.secondary.opacity(0.08))
-                .clipShape(RoundedRectangle(cornerRadius: 14))
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .background(Color.white.opacity(0.06))
 
-                Text(viewModel.coreRequirementsReady ? "Core setup is complete. Launch a panel with Control-Space or Command-right-click and start testing." : "Core setup is still incomplete. You can finish anyway, but HyperPointer will be limited until Claude CLI, Accessibility, and Screen Recording are ready.")
-                    .font(.system(size: 13))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("Before you start")
-                        .font(.system(size: 14, weight: .semibold))
-
-                    VStack(alignment: .leading, spacing: 6) {
-                        testerNote("Every request uses your Claude Code plan. Normal usage is modest, but long sessions add up.")
-                        testerNote("Claude runs commands on your Mac without asking first. Be intentional about what you tell it to do.")
-                        testerNote("Screenshots of the window you point at are sent to Claude as context. Avoid hovering over sensitive info you wouldn't paste into a chat.")
+                // File list
+                VStack(spacing: 0) {
+                    ForEach(tutorial.items) { item in
+                        toyItemRow(item)
+                        if item.id != tutorial.items.last?.id {
+                            Rectangle()
+                                .fill(Color.white.opacity(0.06))
+                                .frame(height: 1)
+                        }
                     }
                 }
-                .padding(16)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color.green.opacity(0.08))
-                .clipShape(RoundedRectangle(cornerRadius: 14))
+                .padding(.vertical, 4)
             }
-            .padding(28)
+            .background(Color(white: 0.15))
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .shadow(color: .black.opacity(0.2), radius: 8, y: 4)
+            .padding(.horizontal, 28)
+
+            Spacer(minLength: 12)
+
+            // Instruction text
+            VStack(spacing: 4) {
+                switch tutorial.phase {
+                case .exploring:
+                    Text("Move your cursor over an item")
+                        .font(.system(size: 14, weight: .medium))
+                    Text("The panel follows your pointer and reads what's underneath.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                case .hovering:
+                    Text("Pause here\u{2026}")
+                        .font(.system(size: 14, weight: .medium))
+                    Text("Hold still for a moment to lock onto this item.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                case .dwelled:
+                    Text("Now release \u{2318}")
+                        .font(.system(size: 14, weight: .medium))
+                    Text("The panel will anchor and an input field will appear.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                case .released:
+                    if let item = tutorial.selectedItem {
+                        Text("Type in the HyperPointer panel: \"\(item.examplePrompt)\"")
+                            .font(.system(size: 14, weight: .medium))
+                        Text("Then press Return to send it to Claude.")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                    }
+                default:
+                    EmptyView()
+                }
+            }
+            .multilineTextAlignment(.center)
+            .padding(.horizontal, 28)
+            .padding(.bottom, 20)
         }
     }
 
-    private func testerNote(_ text: String) -> some View {
-        HStack(alignment: .top, spacing: 8) {
-            Text("\u{2022}")
-                .font(.system(size: 13))
-                .foregroundStyle(.secondary)
-            Text(text)
-                .font(.system(size: 13))
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-    }
+    private func toyItemRow(_ item: ToyItem) -> some View {
+        let isHovered = tutorial.hoveredItem?.id == item.id
+        let showBadge = isHovered && (tutorial.phase == .hovering || tutorial.phase == .dwelled)
 
-    private func finishRow(_ title: String, ready: Bool) -> some View {
-        HStack {
-            Text(title)
-                .font(.system(size: 14, weight: .medium))
+        return HStack(spacing: 10) {
+            Image(systemName: item.icon)
+                .font(.system(size: 16))
+                .foregroundStyle(item.icon == "folder.fill" ? .blue : .white.opacity(0.6))
+                .frame(width: 22)
+            Text(item.name)
+                .font(.system(size: 13))
+                .foregroundStyle(.white.opacity(0.9))
             Spacer()
-            SetupStatusPill(text: ready ? "Ready" : "Pending", isReady: ready)
+            if showBadge {
+                Text(item.name)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.7))
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(Color.white.opacity(0.12))
+                    .clipShape(Capsule())
+                    .transition(.opacity.combined(with: .scale(scale: 0.9)))
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .background(isHovered ? Color.white.opacity(0.08) : Color.clear)
+        .onHover { hovering in
+            if hovering {
+                tutorial.itemHovered(item)
+            } else {
+                tutorial.itemUnhovered()
+            }
         }
     }
+
 }
 
 private struct PermissionRow: View {
