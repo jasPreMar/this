@@ -813,6 +813,7 @@ struct ChatView: View {
     @ObservedObject var viewModel: SearchViewModel
     @State private var textWidth: CGFloat = FocusedTextField.minWidth
     @State private var textHeight: CGFloat = 18
+    @State private var headerDragOffset: CGSize = .zero
     private let fixedChatHeight: CGFloat = 360
 
     private var hasContextRow: Bool {
@@ -822,26 +823,44 @@ struct ChatView: View {
     var body: some View {
         PanelSurface(fixedHeight: fixedChatHeight) {
             VStack(spacing: 0) {
-                if hasContextRow {
-                    PanelHeaderSection(
-                        viewModel: viewModel,
-                        showsCloseButtonOnHover: true,
-                        onClose: viewModel.onClose
-                    )
-                    .background(DragArea())
-                } else {
-                    if !viewModel.selectedText.isEmpty {
-                        PanelHeaderSection(viewModel: viewModel)
+                Group {
+                    if hasContextRow {
+                        PanelHeaderSection(
+                            viewModel: viewModel,
+                            showsCloseButtonOnHover: true,
+                            onClose: viewModel.onClose
+                        )
+                    } else {
+                        VStack(spacing: 0) {
+                            if !viewModel.selectedText.isEmpty {
+                                PanelHeaderSection(viewModel: viewModel)
 
-                        Divider()
-                            .padding(.horizontal, 8)
+                                Divider()
+                                    .padding(.horizontal, 8)
+                            }
+
+                            ChatCloseRow(viewModel: viewModel)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 7)
+                        }
                     }
-
-                    ChatCloseRow(viewModel: viewModel)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 7)
-                    .background(DragArea())
                 }
+                .gesture(
+                    DragGesture(minimumDistance: 3)
+                        .onChanged { value in
+                            guard let window = NSApp.keyWindow else { return }
+                            let delta = CGSize(
+                                width: value.translation.width - headerDragOffset.width,
+                                height: value.translation.height - headerDragOffset.height
+                            )
+                            headerDragOffset = value.translation
+                            window.setFrameOrigin(NSPoint(
+                                x: window.frame.origin.x + delta.width,
+                                y: window.frame.origin.y - delta.height
+                            ))
+                        }
+                        .onEnded { _ in headerDragOffset = .zero }
+                )
 
                 Divider()
                     .padding(.horizontal, 8)
@@ -951,20 +970,3 @@ private struct ChatCloseRow: View {
     }
 }
 
-// MARK: - Drag Area (makes the header draggable)
-
-struct DragArea: NSViewRepresentable {
-    func makeNSView(context: Context) -> NSView {
-        let view = DragView()
-        view.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        view.setContentHuggingPriority(.defaultLow, for: .vertical)
-        return view
-    }
-    func updateNSView(_ nsView: NSView, context: Context) {}
-}
-
-class DragView: NSView {
-    override func mouseDown(with event: NSEvent) {
-        window?.performDrag(with: event)
-    }
-}
