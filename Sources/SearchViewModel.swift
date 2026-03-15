@@ -20,7 +20,6 @@ class SearchViewModel: ObservableObject {
     @Published var isMinimalMode = false
     @Published var claudeManager: ClaudeProcessManager?
     @Published var chatHistory: [(role: String, text: String)] = []
-    @Published var lastScreenshotStatus: String = ""
     @Published var voiceState: VoiceState = .idle
     @Published var voiceLevel: CGFloat = 0
     var currentSessionId: String?
@@ -28,7 +27,7 @@ class SearchViewModel: ObservableObject {
     private var hoveredAppPID: pid_t = 0
 
     /// Set by FloatingPanel
-    var onSubmit: ((String, URL?, String) -> Void)?
+    var onSubmit: ((String, URL?) -> Void)?
     var onClose: (() -> Void)?
 
     var isVoiceModeActive: Bool {
@@ -63,9 +62,8 @@ class SearchViewModel: ObservableObject {
         } else {
             // First message — switch to chat mode
             let context = buildContextMessage()
-            let (screenshotURL, screenshotStatus) = captureHoveredWindowScreenshot()
-            lastScreenshotStatus = screenshotStatus
-            onSubmit?(context, screenshotURL, screenshotStatus)
+            let (screenshotURL, _) = captureHoveredWindowScreenshot()
+            onSubmit?(context, screenshotURL)
         }
     }
 

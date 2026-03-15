@@ -34,7 +34,6 @@ class ClaudeProcessManager: ObservableObject {
     @Published var outputText = ""
     @Published var status: StreamStatus = .waiting
     @Published var events: [StreamEvent] = []
-    @Published var diagnostics: [String] = []
     var onComplete: ((String) -> Void)?
     var sessionId: String?
 
@@ -42,51 +41,27 @@ class ClaudeProcessManager: ObservableObject {
     private var buffer = Data()
     private let queue = DispatchQueue(label: "claude-stream", qos: .userInitiated)
     private var isStopped = false
-    private var jsonLineCount = 0
-    private var nonJSONLineCount = 0
-    private var stderrLineCount = 0
-    private var nonJSONPreviewCount = 0
-    private var runStartedAt: Date?
-    private let maxDiagnostics = 80
 
     func start(
         message: String,
         screenshotURL: URL? = nil,
-        resumeSessionId: String? = nil,
-        screenshotDebug: String? = nil
+        resumeSessionId: String? = nil
     ) {
         // Reset stale events from previous messages
         DispatchQueue.main.async {
             self.events = []
             self.outputText = ""
             self.status = .waiting
-            self.diagnostics = []
         }
         isStopped = false
         accumulated = ""
         buffer = Data()
-        jsonLineCount = 0
-        nonJSONLineCount = 0
-        stderrLineCount = 0
-        nonJSONPreviewCount = 0
-        runStartedAt = Date()
+
 
         guard let claudePath = resolveClaudePath() else {
             status = .error("Could not find 'claude' binary")
             return
         }
-        addDiagnostic("Claude binary: \(claudePath)")
-        if let sid = resumeSessionId {
-            addDiagnostic("Session mode: resume \(sid)")
-        } else {
-            addDiagnostic("Session mode: new")
-        }
-        if let screenshotDebug, !screenshotDebug.isEmpty {
-            addDiagnostic(screenshotDebug)
-        } else if screenshotURL == nil {
-            addDiagnostic("Screenshot not requested for this message")
-        }
-
         let effectiveScreenshotURL = normalizedScreenshotURL(screenshotURL)
 
         // Build stdin JSON payload when image is available (--image flag was removed from claude CLI)
@@ -104,12 +79,7 @@ class ClaudeProcessManager: ObservableObject {
             ]
             if let jsonData = try? JSONSerialization.data(withJSONObject: userMessage) {
                 stdinData = jsonData + Data("\n".utf8)
-                addDiagnostic("Image attachment: \(imageData.count / 1024) KB → stream-json stdin")
-            } else {
-                addDiagnostic("Image attachment: JSON encoding failed, skipping image")
             }
-        } else if screenshotURL != nil {
-            addDiagnostic("Image attachment skipped")
         }
 
         let process = Process()
@@ -185,10 +155,6 @@ class ClaudeProcessManager: ObservableObject {
                 if data.isEmpty { break }
                 if let text = String(data: data, encoding: .utf8) {
                     DispatchQueue.main.async {
-                        self?.stderrLineCount += text.split(whereSeparator: \.isNewline).count
-                        if let firstLine = text.split(whereSeparator: \.isNewline).first {
-                            self?.addDiagnostic("stderr: \(String(firstLine).trimmingCharacters(in: .whitespacesAndNewlines))")
-                        }
                         self?.outputText += "[STDERR] \(text)\n"
                         if case .waiting = self?.status { self?.status = .streaming }
                     }
@@ -203,17 +169,6 @@ class ClaudeProcessManager: ObservableObject {
             }
             DispatchQueue.main.async {
                 guard let self = self else { return }
-                let seconds = self.runStartedAt.map { Date().timeIntervalSince($0) } ?? 0
-                self.addDiagnostic(
-                    String(
-                        format: "Process exit: %d (%.1fs), JSON lines: %d, non-JSON lines: %d, stderr lines: %d",
-                        proc.terminationStatus,
-                        seconds,
-                        self.jsonLineCount,
-                        self.nonJSONLineCount,
-                        self.stderrLineCount
-                    )
-                )
                 if case .error = self.status { return }
                 if self.isStopped || proc.terminationStatus == 0 {
                     self.status = .done
@@ -226,7 +181,6 @@ class ClaudeProcessManager: ObservableObject {
 
         do {
             try process.run()
-            addDiagnostic("Process started (pid: \(process.processIdentifier))")
             // Write image JSON to stdin after process starts (async to avoid pipe-buffer deadlock)
             if let pipe = stdinPipe, let data = stdinData {
                 DispatchQueue.global(qos: .userInitiated).async {
@@ -242,14 +196,9 @@ class ClaudeProcessManager: ObservableObject {
 
     private func normalizedScreenshotURL(_ screenshotURL: URL?) -> URL? {
         guard let screenshotURL = screenshotURL else { return nil }
-        if FileManager.default.fileExists(atPath: screenshotURL.path),
-           let attrs = try? FileManager.default.attributesOfItem(atPath: screenshotURL.path),
-           let bytes = attrs[.size] as? NSNumber {
-            let kb = max(1, bytes.intValue / 1024)
-            addDiagnostic("Screenshot temp file: \(screenshotURL.lastPathComponent) (\(kb) KB)")
+        if FileManager.default.fileExists(atPath: screenshotURL.path) {
             return screenshotURL
         } else {
-            addDiagnostic("Screenshot temp file missing: \(screenshotURL.lastPathComponent)")
             return nil
         }
     }
@@ -267,16 +216,6 @@ class ClaudeProcessManager: ObservableObject {
                 continue
             }
 
-            if isJSONObject(line) {
-                jsonLineCount += 1
-            } else {
-                nonJSONLineCount += 1
-                if nonJSONPreviewCount < 8 {
-                    let preview = String(line.prefix(200))
-                    addDiagnostic("Non-JSON output: \(preview)")
-                    nonJSONPreviewCount += 1
-                }
-            }
 
             let text = extractText(from: line)
             DispatchQueue.main.async {
@@ -375,22 +314,6 @@ class ClaudeProcessManager: ObservableObject {
         return nil
     }
 
-    private func isJSONObject(_ line: String) -> Bool {
-        guard let data = line.data(using: .utf8),
-              let json = try? JSONSerialization.jsonObject(with: data) else {
-            return false
-        }
-        return json is [String: Any]
-    }
-
-    private func addDiagnostic(_ line: String) {
-        DispatchQueue.main.async {
-            self.diagnostics.append(line)
-            if self.diagnostics.count > self.maxDiagnostics {
-                self.diagnostics.removeFirst(self.diagnostics.count - self.maxDiagnostics)
-            }
-        }
-    }
 
     private func resolveClaudePath() -> String? {
         let candidates = [
@@ -676,43 +599,6 @@ struct EventsSummaryView: View {
     }
 }
 
-struct DiagnosticsView: View {
-    let lines: [String]
-    let isLive: Bool
-    @State private var isExpanded = true
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Button(action: { withAnimation(.easeInOut(duration: 0.15)) { isExpanded.toggle() } }) {
-                HStack(spacing: 6) {
-                    Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                        .font(.system(size: 9))
-                        .foregroundColor(.secondary)
-
-                    Image(systemName: "ladybug")
-                        .font(.system(size: 10))
-                        .foregroundColor(.secondary)
-
-                    Text(isLive ? "Run diagnostics (live)" : "Run diagnostics")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundColor(.secondary)
-                }
-            }
-            .buttonStyle(.plain)
-
-            if isExpanded {
-                ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
-                    Text(line)
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundColor(.secondary)
-                        .textSelection(.enabled)
-                }
-            }
-        }
-        .padding(.vertical, 2)
-    }
-}
-
 // MARK: - Panel Content View (switches between search and chat)
 
 struct PanelContentView: View {
@@ -946,14 +832,6 @@ struct ChatView: View {
 
             if let manager = viewModel.claudeManager {
                 EventsSummaryView(manager: manager)
-            }
-
-            if let manager = viewModel.claudeManager,
-               !manager.diagnostics.isEmpty {
-                DiagnosticsView(
-                    lines: manager.diagnostics,
-                    isLive: manager.status == .waiting || manager.status == .streaming
-                )
             }
 
             if let manager = viewModel.claudeManager,

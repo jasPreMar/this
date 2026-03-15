@@ -49,11 +49,10 @@ class FloatingPanel: NSPanel {
         contentView = hostingView
 
         // Wire up the submit callback
-        searchViewModel.onSubmit = { [weak self] context, screenshotURL, screenshotStatus in
+        searchViewModel.onSubmit = { [weak self] context, screenshotURL in
             self?.transitionToTerminal(
                 message: context,
-                screenshotURL: screenshotURL,
-                screenshotStatus: screenshotStatus
+                screenshotURL: screenshotURL
             )
         }
         searchViewModel.onClose = { [weak self] in
@@ -183,8 +182,7 @@ class FloatingPanel: NSPanel {
 
     func transitionToTerminal(
         message: String,
-        screenshotURL: URL? = nil,
-        screenshotStatus: String? = nil
+        screenshotURL: URL? = nil
     ) {
         isTerminalMode = true
         isCursorFollowing = false
@@ -232,8 +230,7 @@ class FloatingPanel: NSPanel {
 
         manager.start(
             message: message,
-            screenshotURL: screenshotURL,
-            screenshotDebug: screenshotStatus
+            screenshotURL: screenshotURL
         )
     }
 
