@@ -17,6 +17,8 @@ class FloatingPanel: NSPanel {
     private var commandKeyMouseMonitor: Any?
     private var globalFlagsMonitor: Any?
     private var localFlagsMonitor: Any?
+    private var dragStartMonitor: Any?
+    private var pendingDragEvent: NSEvent?
     private var hostingView: NSHostingView<PanelContentView>!
     private var isTerminalMode = false
     private var isCommandKeyVisible = false
@@ -76,31 +78,43 @@ class FloatingPanel: NSPanel {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { true }
 
-    /// In chat mode, allow dragging the window from any non-interactive area
-    /// (header text, icons, transcript) without needing a dedicated drag view.
-    /// Interactive controls (close button, text input, scroll view) are passed
-    /// through normally so they keep working.
+    /// In chat mode, make the entire window draggable except the text input and
+    /// scroll area. Always dispatch mouseDown normally so buttons (like the close
+    /// button) receive their events. If the mouse starts moving before the button
+    /// is released, kick off a native window drag instead.
     override func sendEvent(_ event: NSEvent) {
-        if event.type == .leftMouseDown, isTerminalMode,
-           let contentView = contentView {
-            // hitTest expects a point in the receiver's superview coordinate system,
-            // which for a borderless panel matches window base coordinates directly.
-            // Do NOT use convert(from: nil) — NSHostingView is flipped so that
-            // conversion would produce wrong Y values and hitTest would miss.
-            if let hit = contentView.hitTest(event.locationInWindow), !isInteractiveControl(hit) {
-                performDrag(with: event)
-                return
+        if event.type == .leftMouseDown, isTerminalMode {
+            cancelPendingDrag()
+            let hit = contentView?.hitTest(event.locationInWindow)
+            // Skip drag monitoring for scroll / text-input areas so they keep working.
+            if !isScrollOrTextInput(hit) {
+                pendingDragEvent = event
+                dragStartMonitor = NSEvent.addLocalMonitorForEvents(
+                    matching: [.leftMouseDragged, .leftMouseUp]
+                ) { [weak self] e in
+                    guard let self else { return e }
+                    if e.type == .leftMouseDragged, let original = self.pendingDragEvent {
+                        self.cancelPendingDrag()
+                        self.performDrag(with: original)
+                        return nil  // consume — performDrag takes over tracking
+                    }
+                    if e.type == .leftMouseUp { self.cancelPendingDrag() }
+                    return e
+                }
             }
         }
         super.sendEvent(event)
     }
 
-    private func isInteractiveControl(_ view: NSView) -> Bool {
-        var v: NSView? = view
+    private func cancelPendingDrag() {
+        if let m = dragStartMonitor { NSEvent.removeMonitor(m); dragStartMonitor = nil }
+        pendingDragEvent = nil
+    }
+
+    private func isScrollOrTextInput(_ view: NSView?) -> Bool {
+        var v = view
         while let current = v {
-            if current is NSControl || current is NSTextView || current is NSScrollView {
-                return true
-            }
+            if current is NSScrollView || current is NSTextView { return true }
             v = current.superview
         }
         return false
@@ -360,6 +374,7 @@ class FloatingPanel: NSPanel {
         commandKeyMouseMonitor = nil
         globalFlagsMonitor = nil
         localFlagsMonitor = nil
+        cancelPendingDrag()
     }
 
     override func close() {
