@@ -117,7 +117,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 existing.restartCommandKeyMode()
             } else {
                 panels.removeAll { !$0.isVisible }
-                let panel = FloatingPanel()
+                let panel = makePanel()
                 commandKeyPanel = panel
                 panels.append(panel)
                 panel.startCommandKeyMode()
@@ -209,9 +209,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func handleStatusLeaveFeedback() {
-        if let url = URL(string: "https://prickly-perfume-f62.notion.site/5ca57834b3ec456eba024dc6ac60a337?pvs=105") {
-            NSWorkspace.shared.open(url)
-        }
+        openFeedbackPage()
     }
 
     @objc private func handleStatusQuit() {
@@ -295,10 +293,25 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         CGEvent.tapEnable(tap: tap, enable: true)
     }
 
+    private func makePanel() -> FloatingPanel {
+        let panel = FloatingPanel()
+        panel.onFeedbackShake = { [weak self] in
+            self?.openFeedbackPage()
+        }
+        return panel
+    }
+
+    func openFeedbackPage() {
+        guard let url = URL(string: "https://prickly-perfume-f62.notion.site/5ca57834b3ec456eba024dc6ac60a337?pvs=105") else {
+            return
+        }
+        NSWorkspace.shared.open(url)
+    }
+
     func createNewPanel() {
         panels.removeAll { !$0.isVisible }
 
-        let panel = FloatingPanel()
+        let panel = makePanel()
         panels.append(panel)
         panel.show()
     }
@@ -310,7 +323,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
         panels.removeAll { !$0.isVisible }
 
-        let panel = FloatingPanel()
+        let panel = makePanel()
         panels.append(panel)
         panel.show(at: point)
     }
