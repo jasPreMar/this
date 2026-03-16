@@ -318,10 +318,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         let webView = WKWebView(frame: NSRect(x: 0, y: 0, width: 480, height: 580))
+        let focusDelegate = FeedbackWebViewDelegate()
+        webView.navigationDelegate = focusDelegate
         webView.load(URLRequest(url: url))
 
         let viewController = NSViewController()
         viewController.view = webView
+        objc_setAssociatedObject(viewController, &FeedbackWebViewDelegate.associatedKey, focusDelegate, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
 
         let popover = NSPopover()
         popover.contentSize = NSSize(width: 480, height: 580)
@@ -436,5 +439,19 @@ extension AppDelegate: NSWindowDelegate {
         }
         onboardingWindow = nil
         UserDefaults.standard.set(true, forKey: onboardingSeenKey)
+    }
+}
+
+private class FeedbackWebViewDelegate: NSObject, WKNavigationDelegate {
+    static var associatedKey: UInt8 = 0
+
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        // Notion forms render dynamically; delay slightly to let React mount the fields.
+        webView.evaluateJavaScript("""
+            setTimeout(function() {
+                var el = document.querySelector('input[type="text"], input[type="email"], textarea, [contenteditable="true"]');
+                if (el) { el.focus(); }
+            }, 600);
+        """, completionHandler: nil)
     }
 }
