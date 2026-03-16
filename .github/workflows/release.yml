@@ -21,19 +21,36 @@ jobs:
       - name: Determine version
         id: version
         run: |
-          CURRENT=$(cat VERSION)
-          IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT"
-          PATCH=$((PATCH + 1))
-          NEW_VERSION="${MAJOR}.${MINOR}.${PATCH}"
-          echo "$NEW_VERSION" > VERSION
-          echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
-          echo "tag=v${NEW_VERSION}"  >> $GITHUB_OUTPUT
+          SHORT=$(cat VERSION)
+          LATEST_RELEASE=$(git tag --list 'v*' --sort=-v:refname | head -n1 | sed 's/^v//')
+          LATEST_MATCHING_BUILD=$(git tag --list "v${SHORT}.*" --sort=-v:refname | head -n1 | sed -E "s/^v${SHORT//./\\.}\.([0-9]+)$/\\1/")
+
+          if [[ -z "$LATEST_MATCHING_BUILD" || "$LATEST_MATCHING_BUILD" == "v${SHORT}.*" ]]; then
+            BUILD=1
+          else
+            BUILD=$((LATEST_MATCHING_BUILD + 1))
+          fi
+
+          NEW_RELEASE="${SHORT}.${BUILD}"
+          if [[ -n "$LATEST_RELEASE" ]]; then
+            HIGHEST=$(printf '%s\n%s\n' "$NEW_RELEASE" "$LATEST_RELEASE" | sort -V | tail -n1)
+            if [[ "$HIGHEST" != "$NEW_RELEASE" || "$NEW_RELEASE" == "$LATEST_RELEASE" ]]; then
+              echo "Next release ($NEW_RELEASE) must be newer than the latest shipped version ($LATEST_RELEASE)." >&2
+              exit 1
+            fi
+          fi
+
+          echo "short=$SHORT"            >> $GITHUB_OUTPUT
+          echo "build=$BUILD"            >> $GITHUB_OUTPUT
+          echo "release=$NEW_RELEASE"    >> $GITHUB_OUTPUT
+          echo "tag=v${NEW_RELEASE}"     >> $GITHUB_OUTPUT
 
       - name: Stamp version into Info.plist
         run: |
-          VERSION=${{ steps.version.outputs.version }}
-          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${VERSION}" Sources/Info.plist
-          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${VERSION}"            Sources/Info.plist
+          SHORT=${{ steps.version.outputs.short }}
+          BUILD=${{ steps.version.outputs.build }}
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${SHORT}.${BUILD}" Sources/Info.plist
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${BUILD}"                     Sources/Info.plist
 
       - name: Resolve Swift packages
         run: swift package resolve
@@ -138,7 +155,8 @@ jobs:
       - name: Update appcast.xml
         env:
           TAG:       ${{ steps.version.outputs.tag }}
-          VERSION:   ${{ steps.version.outputs.version }}
+          SHORT:     ${{ steps.version.outputs.short }}
+          BUILD:     ${{ steps.version.outputs.build }}
           SIZE:      ${{ steps.dmg.outputs.size }}
           SIGNATURE: ${{ steps.sign.outputs.signature }}
         run: |
@@ -154,9 +172,9 @@ jobs:
               <description>HyperPointer changelog</description>
               <language>en</language>
               <item>
-                <title>Version ${VERSION}</title>
-                <sparkle:version>${VERSION}</sparkle:version>
-                <sparkle:shortVersionString>${VERSION}</sparkle:shortVersionString>
+                <title>Version ${SHORT}.${BUILD}</title>
+                <sparkle:version>${BUILD}</sparkle:version>
+                <sparkle:shortVersionString>${SHORT}.${BUILD}</sparkle:shortVersionString>
                 <pubDate>${PUBDATE}</pubDate>
                 <enclosure
                   url="https://github.com/jasPreMar/hyper-pointer/releases/download/${TAG}/HyperPointer.dmg"
@@ -172,7 +190,7 @@ jobs:
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add Sources/Info.plist appcast.xml VERSION
+          git add Sources/Info.plist appcast.xml
           git commit -m "chore: release ${{ steps.version.outputs.tag }} [skip ci]"
           git push
 
