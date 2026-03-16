@@ -3,6 +3,130 @@ import SwiftUI
 
 class FloatingPanel: NSPanel {
     private static let maxPanelDimension: CGFloat = 392
+    private struct MouseShakeDetector {
+        private struct Segment {
+            let direction: CGFloat
+            let horizontalDistance: CGFloat
+            let verticalDistance: CGFloat
+            let timestamp: TimeInterval
+        }
+
+        private static let resetInterval: TimeInterval = 0.18
+        private static let detectionWindow: TimeInterval = 0.55
+        private static let minimumHorizontalDelta: CGFloat = 6
+        private static let minimumSegmentDistance: CGFloat = 60
+        private static let minimumTotalTravel: CGFloat = 320
+        private static let minimumAverageHorizontalSpeed: CGFloat = 700
+        private static let maximumVerticalRatio: CGFloat = 0.6
+        private static let requiredSegments = 5
+
+        private var lastPoint: NSPoint?
+        private var lastTimestamp: TimeInterval?
+        private var activeDirection: CGFloat = 0
+        private var activeHorizontalDistance: CGFloat = 0
+        private var activeVerticalDistance: CGFloat = 0
+        private var segments: [Segment] = []
+
+        mutating func reset() {
+            lastPoint = nil
+            lastTimestamp = nil
+            activeDirection = 0
+            activeHorizontalDistance = 0
+            activeVerticalDistance = 0
+            segments.removeAll(keepingCapacity: true)
+        }
+
+        mutating func register(point: NSPoint, timestamp: TimeInterval = ProcessInfo.processInfo.systemUptime) -> Bool {
+            defer {
+                lastPoint = point
+                lastTimestamp = timestamp
+            }
+
+            guard let previousPoint = lastPoint,
+                  let previousTimestamp = lastTimestamp else {
+                return false
+            }
+
+            let elapsed = timestamp - previousTimestamp
+            if elapsed > Self.resetInterval {
+                reset()
+                return false
+            }
+
+            let deltaX = point.x - previousPoint.x
+            let deltaY = point.y - previousPoint.y
+            let horizontalDistance = abs(deltaX)
+            guard horizontalDistance >= Self.minimumHorizontalDelta else {
+                return false
+            }
+
+            let direction: CGFloat = deltaX >= 0 ? 1 : -1
+            if activeDirection == 0 || direction == activeDirection {
+                activeDirection = direction
+                activeHorizontalDistance += horizontalDistance
+                activeVerticalDistance += abs(deltaY)
+                return false
+            }
+
+            segments.append(
+                Segment(
+                    direction: activeDirection,
+                    horizontalDistance: activeHorizontalDistance,
+                    verticalDistance: activeVerticalDistance,
+                    timestamp: previousTimestamp
+                )
+            )
+
+            activeDirection = direction
+            activeHorizontalDistance = horizontalDistance
+            activeVerticalDistance = abs(deltaY)
+
+            trimSegments(after: timestamp)
+            guard qualifiesForShake() else { return false }
+
+            reset()
+            return true
+        }
+
+        private mutating func trimSegments(after timestamp: TimeInterval) {
+            segments.removeAll { timestamp - $0.timestamp > Self.detectionWindow }
+            if segments.count > Self.requiredSegments {
+                segments.removeFirst(segments.count - Self.requiredSegments)
+            }
+        }
+
+        private func qualifiesForShake() -> Bool {
+            guard segments.count == Self.requiredSegments else { return false }
+
+            var previousDirection: CGFloat?
+            var totalHorizontalDistance: CGFloat = 0
+
+            for segment in segments {
+                guard segment.horizontalDistance >= Self.minimumSegmentDistance else { return false }
+                guard segment.verticalDistance <= segment.horizontalDistance * Self.maximumVerticalRatio else {
+                    return false
+                }
+                if let previousDirection, previousDirection == segment.direction {
+                    return false
+                }
+                previousDirection = segment.direction
+                totalHorizontalDistance += segment.horizontalDistance
+            }
+
+            guard let firstTimestamp = segments.first?.timestamp,
+                  let lastTimestamp = segments.last?.timestamp,
+                  lastTimestamp - firstTimestamp <= Self.detectionWindow else {
+                return false
+            }
+
+            let duration = lastTimestamp - firstTimestamp
+            guard duration > 0 else { return false }
+
+            return totalHorizontalDistance >= Self.minimumTotalTravel &&
+                (totalHorizontalDistance / duration) >= Self.minimumAverageHorizontalSpeed
+        }
+    }
+
     private struct FocusRestorationState {
         weak var app: NSRunningApplication?
         let bundleIdentifier: String?
@@ -28,7 +152,9 @@ class FloatingPanel: NSPanel {
     private var focusRestorationState: FocusRestorationState?
     private var shouldRestoreFocusOnClose = true
     private let voiceController = VoiceDictationController()
+    private var mouseShakeDetector = MouseShakeDetector()
     var isCommandKeyHeld = false
+    var onFeedbackShake: (() -> Void)?
 
     init() {
         super.init(
@@ -236,11 +362,14 @@ class FloatingPanel: NSPanel {
     }
 
     private func positionAtCursor() {
+        positionAtCursor(using: NSEvent.mouseLocation)
+    }
+
+    private func positionAtCursor(using mouse: NSPoint) {
         guard !isTerminalMode else { return }
         let fittingSize = hostingView.fittingSize
         setContentSize(fittingSize)
 
-        let mouse = NSEvent.mouseLocation
         let x = mouse.x + 4
         let y = mouse.y - fittingSize.height - 4
 
@@ -305,6 +434,7 @@ class FloatingPanel: NSPanel {
         searchViewModel.query = ""
         isCommandKeyVisible = false
         isCursorFollowing = true
+        mouseShakeDetector.reset()
 
         // Show the indicator right away at the current cursor position
         searchViewModel.updateHoveredApp()
@@ -317,8 +447,7 @@ class FloatingPanel: NSPanel {
                 self.isCommandKeyVisible = true
                 self.searchViewModel.isMinimalMode = false
             }
-            self.positionAtCursor()
-            self.searchViewModel.updateHoveredApp()
+            self.handleCommandKeyMouseMove()
         }
     }
 
@@ -329,6 +458,7 @@ class FloatingPanel: NSPanel {
         if let m = globalMouseMonitor { NSEvent.removeMonitor(m); globalMouseMonitor = nil }
         if let m = localMouseMonitor { NSEvent.removeMonitor(m); localMouseMonitor = nil }
         isCursorFollowing = false
+        mouseShakeDetector.reset()
 
         if searchViewModel.isVoiceModeActive {
             searchViewModel.isCommandKeyMode = false
@@ -371,6 +501,7 @@ class FloatingPanel: NSPanel {
         installFlagsMonitors()
         isCommandKeyVisible = true
         isCursorFollowing = true
+        mouseShakeDetector.reset()
         if searchViewModel.query.isEmpty {
             searchViewModel.isCommandKeyMode = true
         }
@@ -378,15 +509,25 @@ class FloatingPanel: NSPanel {
         // Global monitor fires when another app is frontmost; local monitor fires when we are.
         commandKeyMouseMonitor = NSEvent.addGlobalMonitorForEvents(matching: .mouseMoved) { [weak self] _ in
             guard let self else { return }
-            self.positionAtCursor()
-            self.searchViewModel.updateHoveredApp()
+            self.handleCommandKeyMouseMove()
         }
         localMouseMonitor = NSEvent.addLocalMonitorForEvents(matching: .mouseMoved) { [weak self] event in
             guard let self else { return event }
-            self.positionAtCursor()
-            self.searchViewModel.updateHoveredApp()
+            self.handleCommandKeyMouseMove()
             return event
         }
+    }
+
+    private func handleCommandKeyMouseMove() {
+        let mouseLocation = NSEvent.mouseLocation
+        if mouseShakeDetector.register(point: mouseLocation) {
+            dismiss(restorePreviousFocus: false)
+            onFeedbackShake?()
+            return
+        }
+
+        positionAtCursor(using: mouseLocation)
+        searchViewModel.updateHoveredApp()
     }
 
     private func removeAllMonitors() {
@@ -407,6 +548,7 @@ class FloatingPanel: NSPanel {
         globalFlagsMonitor = nil
         localFlagsMonitor = nil
         cancelPendingDrag()
+        mouseShakeDetector.reset()
     }
 
     override func close() {

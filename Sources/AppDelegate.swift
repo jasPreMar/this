@@ -119,7 +119,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 existing.restartCommandKeyMode()
             } else {
                 panels.removeAll { !$0.isVisible }
-                let panel = FloatingPanel()
+                let panel = makePanel()
                 commandKeyPanel = panel
                 panels.append(panel)
                 panel.startCommandKeyMode()
@@ -211,29 +211,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func handleStatusLeaveFeedback() {
-        guard let button = statusItem?.button else { return }
-
-        // Toggle: close if already visible
-        if let existing = feedbackPopover, existing.isShown {
-            existing.performClose(nil)
-            return
-        }
-
-        let webView = WKWebView(frame: NSRect(x: 0, y: 0, width: 480, height: 580))
-        if let url = URL(string: "https://prickly-perfume-f62.notion.site/ebd/5ca57834b3ec456eba024dc6ac60a337") {
-            webView.load(URLRequest(url: url))
-        }
-
-        let vc = NSViewController()
-        vc.view = webView
-
-        let popover = NSPopover()
-        popover.contentSize = NSSize(width: 480, height: 580)
-        popover.contentViewController = vc
-        popover.behavior = .transient
-        feedbackPopover = popover
-
-        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        openFeedbackPage()
     }
 
     @objc private func handleStatusQuit() {
@@ -317,10 +295,48 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         CGEvent.tapEnable(tap: tap, enable: true)
     }
 
+    private func makePanel() -> FloatingPanel {
+        let panel = FloatingPanel()
+        panel.onFeedbackShake = { [weak self] in
+            self?.openFeedbackPage()
+        }
+        return panel
+    }
+
+    func openFeedbackPage() {
+        guard let url = URL(string: "https://prickly-perfume-f62.notion.site/ebd/5ca57834b3ec456eba024dc6ac60a337") else {
+            return
+        }
+        guard let button = statusItem?.button else {
+            NSWorkspace.shared.open(url)
+            return
+        }
+
+        // Keep the menu action and shake gesture on the same feedback UI path.
+        if let existing = feedbackPopover, existing.isShown {
+            existing.performClose(nil)
+            return
+        }
+
+        let webView = WKWebView(frame: NSRect(x: 0, y: 0, width: 480, height: 580))
+        webView.load(URLRequest(url: url))
+
+        let viewController = NSViewController()
+        viewController.view = webView
+
+        let popover = NSPopover()
+        popover.contentSize = NSSize(width: 480, height: 580)
+        popover.contentViewController = viewController
+        popover.behavior = .transient
+        feedbackPopover = popover
+
+        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+    }
+
     func createNewPanel() {
         panels.removeAll { !$0.isVisible }
 
-        let panel = FloatingPanel()
+        let panel = makePanel()
         panels.append(panel)
         panel.show()
     }
@@ -332,7 +348,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
         panels.removeAll { !$0.isVisible }
 
-        let panel = FloatingPanel()
+        let panel = makePanel()
         panels.append(panel)
         panel.show(at: point)
     }
