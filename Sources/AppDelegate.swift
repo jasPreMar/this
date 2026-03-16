@@ -183,6 +183,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let leaveFeedbackItem = NSMenuItem(title: "Leave Feedback", action: #selector(handleStatusLeaveFeedback), keyEquivalent: "")
         leaveFeedbackItem.target = self
 
+        let killAllItem = NSMenuItem(title: "Kill All Tasks", action: #selector(handleStatusKillAll), keyEquivalent: "k")
+        killAllItem.target = self
+
         let quitItem = NSMenuItem(title: "Quit HyperPointer", action: #selector(handleStatusQuit), keyEquivalent: "q")
         quitItem.target = self
 
@@ -190,6 +193,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(versionItem)
         menu.addItem(.separator())
         menu.addItem(newPanelItem)
+        menu.addItem(killAllItem)
         menu.addItem(onboardingItem)
         menu.addItem(.separator())
         menu.addItem(checkForUpdatesItem)
@@ -211,6 +215,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func handleStatusLeaveFeedback() {
         openFeedbackPage()
+    }
+
+    @objc private func handleStatusKillAll() {
+        for panel in panels {
+            panel.searchViewModel.claudeManager?.stop()
+            panel.close()
+        }
+        panels.removeAll()
     }
 
     @objc private func handleStatusQuit() {
