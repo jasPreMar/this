@@ -179,6 +179,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let onboardingItem = NSMenuItem(title: "Open Onboarding", action: #selector(handleStatusOpenOnboarding), keyEquivalent: ",")
         onboardingItem.target = self
 
+        let leaveFeedbackItem = NSMenuItem(title: "Leave Feedback", action: #selector(handleStatusLeaveFeedback), keyEquivalent: "")
+        leaveFeedbackItem.target = self
+
         let quitItem = NSMenuItem(title: "Quit HyperPointer", action: #selector(handleStatusQuit), keyEquivalent: "q")
         quitItem.target = self
 
@@ -189,6 +192,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(onboardingItem)
         menu.addItem(.separator())
         menu.addItem(checkForUpdatesItem)
+        menu.addItem(leaveFeedbackItem)
         menu.addItem(.separator())
         menu.addItem(quitItem)
 
@@ -202,6 +206,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func handleStatusOpenOnboarding() {
         showOnboarding(force: true)
+    }
+
+    @objc private func handleStatusLeaveFeedback() {
+        if let url = URL(string: "https://prickly-perfume-f62.notion.site/5ca57834b3ec456eba024dc6ac60a337?pvs=105") {
+            NSWorkspace.shared.open(url)
+        }
     }
 
     @objc private func handleStatusQuit() {
