@@ -206,6 +206,7 @@ class FloatingPanel: NSPanel {
         voiceController.onTranscript = { [weak self] transcript in
             guard let self else { return }
             self.searchViewModel.query = transcript
+            self.searchViewModel.submitMessage()
         }
     }
 
