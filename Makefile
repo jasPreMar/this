@@ -10,6 +10,7 @@ DMG_PATH  := dist/HyperPointer.dmg
 # Build and sign (sign only if cert exists)
 build:
 	swift build
+	@BIN_DIR=$$(swift build --show-bin-path 2>/dev/null) && cp Sources/Resources/*.wav "$$BIN_DIR/" 2>/dev/null || true
 	@$(MAKE) --no-print-directory sign
 
 # Sign with stable identity if cert exists; otherwise skip silently.
