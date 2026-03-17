@@ -224,6 +224,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func showOnboardingIfNeeded() {
+        if OnboardingViewModel.shouldResumeOnLaunch {
+            showOnboarding(force: true)
+            OnboardingViewModel.clearResumeOnLaunch()
+            return
+        }
+
         if !UserDefaults.standard.bool(forKey: onboardingSeenKey) {
             showOnboarding()
         }
@@ -246,13 +252,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 UserDefaults.standard.set(true, forKey: self.onboardingSeenKey)
                 self.closeOnboarding()
             },
-            onAccessibilityGranted: { [weak self] in
-                self?.setupRightClickTapIfNeeded()
+            onAccessibilityStateChange: { [weak self] isGranted in
+                self?.updateAccessibilityMonitoring(isGranted: isGranted)
             }
         )
 
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 760, height: 560),
+            contentRect: NSRect(x: 0, y: 0, width: 618, height: 768),
             styleMask: [.titled, .closable, .miniaturizable],
             backing: .buffered,
             defer: false
@@ -273,9 +279,23 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         onboardingWindow = nil
     }
 
+    private func updateAccessibilityMonitoring(isGranted: Bool) {
+        if isGranted {
+            setupRightClickTapIfNeeded()
+        } else {
+            tearDownRightClickTap()
+        }
+    }
+
     private func setupRightClickTapIfNeeded() {
         guard eventTap == nil, AXIsProcessTrusted() else { return }
         setupRightClickTap()
+    }
+
+    private func tearDownRightClickTap() {
+        guard let tap = eventTap else { return }
+        CFMachPortInvalidate(tap)
+        eventTap = nil
     }
 
     private func setupRightClickTap() {
