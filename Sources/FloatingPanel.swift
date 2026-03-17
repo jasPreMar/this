@@ -157,6 +157,7 @@ class FloatingPanel: NSPanel {
     private var isTerminalMode = false
     private var isCommandKeyVisible = false
     private var isCursorFollowing = false
+    private var currentModifierFlags: NSEvent.ModifierFlags = []
     private var lastReportedContentSize: CGSize = .zero
     private var focusRestorationState: FocusRestorationState?
     private var shouldRestoreFocusOnClose = true
@@ -454,8 +455,9 @@ class FloatingPanel: NSPanel {
 
     /// Called when the invoke hotkey is pressed. Shows a minimal icon indicator immediately,
     /// then expands to the full panel on the first cursor move.
-    func startCommandKeyMode() {
+    func startCommandKeyMode(with modifierFlags: NSEvent.ModifierFlags) {
         isCommandKeyHeld = true
+        currentModifierFlags = modifierFlags
         searchViewModel.isCommandKeyMode = true
         searchViewModel.isMinimalMode = true
         searchViewModel.query = ""
@@ -467,7 +469,7 @@ class FloatingPanel: NSPanel {
         searchViewModel.updateHoveredApp()
         positionAtCursor()
         orderFront(nil)
-        startVoiceModeIfNeeded()
+        updateModifierFlags(modifierFlags)
 
         commandKeyMouseMonitor = NSEvent.addGlobalMonitorForEvents(matching: .mouseMoved) { [weak self] _ in
             guard let self else { return }
@@ -523,19 +525,20 @@ class FloatingPanel: NSPanel {
 
     /// Re-enter cursor-following on an already-visible panel.
     /// Hides the input row only if no text has been typed yet.
-    func restartCommandKeyMode() {
+    func restartCommandKeyMode(with modifierFlags: NSEvent.ModifierFlags) {
         if let m = globalMouseMonitor { NSEvent.removeMonitor(m); globalMouseMonitor = nil }
         if let m = localMouseMonitor { NSEvent.removeMonitor(m); localMouseMonitor = nil }
         if let m = commandKeyMouseMonitor { NSEvent.removeMonitor(m); commandKeyMouseMonitor = nil }
 
         isCommandKeyHeld = true
+        currentModifierFlags = modifierFlags
         isCommandKeyVisible = true
         isCursorFollowing = true
         mouseShakeDetector.reset()
         if searchViewModel.query.isEmpty {
             searchViewModel.isCommandKeyMode = true
         }
-        startVoiceModeIfNeeded()
+        updateModifierFlags(modifierFlags)
 
         // Global monitor fires when another app is frontmost; local monitor fires when we are.
         commandKeyMouseMonitor = NSEvent.addGlobalMonitorForEvents(matching: .mouseMoved) { [weak self] _ in
@@ -618,6 +621,7 @@ class FloatingPanel: NSPanel {
         isTerminalMode = false
         isCommandKeyVisible = false
         isCursorFollowing = false
+        currentModifierFlags = []
         isCommandKeyHeld = false
 
         if shouldRestoreFocus {
@@ -640,6 +644,11 @@ class FloatingPanel: NSPanel {
         close()
     }
 
+    func updateModifierFlags(_ modifierFlags: NSEvent.ModifierFlags) {
+        currentModifierFlags = modifierFlags
+        syncVoiceModeWithCurrentModifiers()
+    }
+
     private func startVoiceModeIfNeeded() {
         guard isVisible,
               !isTerminalMode,
@@ -649,6 +658,30 @@ class FloatingPanel: NSPanel {
               !searchViewModel.isVoiceModeActive else { return }
 
         voiceController.start()
+    }
+
+    private func syncVoiceModeWithCurrentModifiers() {
+        guard isVisible,
+              !isTerminalMode,
+              !searchViewModel.isChatMode,
+              isCommandKeyHeld,
+              searchViewModel.isCommandKeyMode else { return }
+
+        guard AppSettings.autoVoiceEnabled || currentModifierFlags.contains(.shift) else {
+            cancelVoiceModeIfNeeded()
+            return
+        }
+
+        startVoiceModeIfNeeded()
+    }
+
+    private func cancelVoiceModeIfNeeded() {
+        switch searchViewModel.voiceState {
+        case .listening, .idle:
+            voiceController.cancel()
+        case .transcribing, .failed:
+            break
+        }
     }
 
     private func stopVoiceModeIfNeeded() {

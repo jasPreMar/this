@@ -90,22 +90,12 @@ class ClaudeProcessManager: ObservableObject {
         self.process = process
 
         process.executableURL = URL(fileURLWithPath: "/bin/zsh")
-        var claudeCmd: String
         let useStreamJsonInput = stdinData != nil
-        let systemPromptFlag = "--system-prompt \"$HP_SYSTEM\""
-        if useStreamJsonInput {
-            if let sid = resumeSessionId {
-                claudeCmd = "\(claudePath) --print --resume \(sid) \(systemPromptFlag) --input-format stream-json --output-format stream-json --verbose --dangerously-skip-permissions 2>&1"
-            } else {
-                claudeCmd = "\(claudePath) --print \(systemPromptFlag) --input-format stream-json --output-format stream-json --verbose --dangerously-skip-permissions 2>&1"
-            }
-        } else {
-            if let sid = resumeSessionId {
-                claudeCmd = "\(claudePath) --print --resume \(sid) \(systemPromptFlag) -p \"$HP_MESSAGE\" --output-format stream-json --verbose --dangerously-skip-permissions 2>&1"
-            } else {
-                claudeCmd = "\(claudePath) --print \(systemPromptFlag) -p \"$HP_MESSAGE\" --output-format stream-json --verbose --dangerously-skip-permissions 2>&1"
-            }
-        }
+        let claudeCmd = makeClaudeCommand(
+            claudePath: claudePath,
+            resumeSessionId: resumeSessionId,
+            useStreamJSONInput: useStreamJsonInput
+        )
         process.arguments = ["-l", "-c", claudeCmd]
 
         // Set up stdin: pipe for image data, null device for text-only
@@ -232,6 +222,48 @@ class ClaudeProcessManager: ObservableObject {
             status = .error("Failed to launch: \(error.localizedDescription)")
             return
         }
+    }
+
+    private func makeClaudeCommand(
+        claudePath: String,
+        resumeSessionId: String?,
+        useStreamJSONInput: Bool
+    ) -> String {
+        var commandParts = [shellQuoted(claudePath), "--print"]
+
+        if let resumeSessionId {
+            commandParts.append("--resume")
+            commandParts.append(shellQuoted(resumeSessionId))
+        }
+
+        commandParts.append("--model")
+        commandParts.append(shellQuoted(AppSettings.defaultModel.rawValue))
+        commandParts.append("--thinking")
+        commandParts.append(AppSettings.claudeThinkingMode)
+        commandParts.append("--settings")
+        commandParts.append(shellQuoted(AppSettings.claudeSettingsJSONString))
+        commandParts.append("--system-prompt")
+        commandParts.append("\"$HP_SYSTEM\"")
+
+        if useStreamJSONInput {
+            commandParts.append("--input-format")
+            commandParts.append("stream-json")
+        } else {
+            commandParts.append("-p")
+            commandParts.append("\"$HP_MESSAGE\"")
+        }
+
+        commandParts.append("--output-format")
+        commandParts.append("stream-json")
+        commandParts.append("--verbose")
+        commandParts.append("--dangerously-skip-permissions")
+        commandParts.append("2>&1")
+
+        return commandParts.joined(separator: " ")
+    }
+
+    private func shellQuoted(_ value: String) -> String {
+        "'\(value.replacingOccurrences(of: "'", with: "'\"'\"'"))'"
     }
 
     private func normalizedScreenshotURL(_ screenshotURL: URL?) -> URL? {

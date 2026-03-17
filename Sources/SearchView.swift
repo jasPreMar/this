@@ -164,7 +164,7 @@ struct PanelHeaderSection<Accessory: View>: View {
                     Group {
                         switch viewModel.voiceState {
                         case .listening:
-                            Text("Release Command to send")
+                            Text("Release \(InvokeHotKey.stored().displayName) to send")
                                 .font(.system(size: 13))
                                 .foregroundColor(.secondary)
                         case .transcribing:

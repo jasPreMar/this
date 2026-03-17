@@ -55,6 +55,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var localFlagsMonitor: Any?
     private var statusItem: NSStatusItem?
     private var onboardingWindow: NSWindow?
+    private var settingsWindow: NSWindow?
     private var commandKeyHeld = false
     private weak var commandKeyPanel: FloatingPanel?
     private var updaterController: SPUStandardUpdaterController?
@@ -67,7 +68,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         sharedAppDelegate = self
-        UserDefaults.standard.register(defaults: ["chimeEnabled": true])
+        AppSettings.registerDefaults()
         setupMainMenu()
         updaterController = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: self, userDriverDelegate: nil)
         setupStatusItem()
@@ -102,7 +103,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func handleFlagsChanged(_ event: NSEvent) {
-        let invokeKeyDown = InvokeHotKey.stored().isPressed(in: event.modifierFlags)
+        let modifierFlags = event.modifierFlags
+        let invokeKeyDown = InvokeHotKey.stored().isPressed(in: modifierFlags)
         if invokeKeyDown && !commandKeyHeld {
             commandKeyHeld = true
 
@@ -112,18 +114,21 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }) {
                 commandKeyPanel = existing
                 existing.isCommandKeyHeld = true
-                existing.restartCommandKeyMode()
+                existing.restartCommandKeyMode(with: modifierFlags)
             } else {
                 panels.removeAll { !$0.isVisible }
                 let panel = makePanel()
                 commandKeyPanel = panel
                 panels.append(panel)
-                panel.startCommandKeyMode()
+                panel.startCommandKeyMode(with: modifierFlags)
             }
+        } else if invokeKeyDown && commandKeyHeld {
+            commandKeyPanel?.updateModifierFlags(modifierFlags)
         } else if !invokeKeyDown && commandKeyHeld {
             commandKeyHeld = false
             if let panel = commandKeyPanel {
                 panel.isCommandKeyHeld = false
+                panel.updateModifierFlags(modifierFlags)
                 panel.endCommandKeyMode()
             }
             commandKeyPanel = nil
@@ -169,11 +174,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let newPanelItem = NSMenuItem(title: "New Panel", action: #selector(handleStatusNewPanel), keyEquivalent: "n")
         newPanelItem.target = self
 
+        let settingsItem = NSMenuItem(title: "Settings…", action: #selector(handleStatusOpenSettings), keyEquivalent: ",")
+        settingsItem.target = self
+
         let checkForUpdatesItem = NSMenuItem(title: "Check for Updates…", action: #selector(SPUStandardUpdaterController.checkForUpdates(_:)), keyEquivalent: "")
         checkForUpdatesItem.target = updaterController
         self.checkForUpdatesItem = checkForUpdatesItem
 
-        let onboardingItem = NSMenuItem(title: "Open Onboarding", action: #selector(handleStatusOpenOnboarding), keyEquivalent: ",")
+        let onboardingItem = NSMenuItem(title: "Open Onboarding", action: #selector(handleStatusOpenOnboarding), keyEquivalent: "")
         onboardingItem.target = self
 
         let leaveFeedbackItem = NSMenuItem(title: "Leave Feedback", action: #selector(handleStatusLeaveFeedback), keyEquivalent: "")
@@ -189,6 +197,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(versionItem)
         menu.addItem(.separator())
         menu.addItem(newPanelItem)
+        menu.addItem(settingsItem)
         menu.addItem(killAllItem)
         menu.addItem(onboardingItem)
         menu.addItem(.separator())
@@ -203,6 +212,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func handleStatusNewPanel() {
         createNewPanel()
+    }
+
+    @objc private func handleStatusOpenSettings() {
+        showSettings()
     }
 
     @objc private func handleStatusOpenOnboarding() {
@@ -279,6 +292,36 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func closeOnboarding() {
         onboardingWindow?.orderOut(nil)
         onboardingWindow = nil
+    }
+
+    private func showSettings() {
+        if let settingsWindow {
+            settingsWindow.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 780, height: 620),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = "HyperPointer Settings"
+        window.isReleasedWhenClosed = false
+        window.center()
+        window.contentView = NSHostingView(
+            rootView: SettingsView(
+                onAccessibilityStateChange: { [weak self] isGranted in
+                    self?.updateAccessibilityMonitoring(isGranted: isGranted)
+                }
+            )
+        )
+        window.delegate = self
+
+        settingsWindow = window
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     private func updateAccessibilityMonitoring(isGranted: Bool) {
@@ -476,10 +519,13 @@ extension AppDelegate: SPUUpdaterDelegate {
 
 extension AppDelegate: NSWindowDelegate {
     func windowWillClose(_ notification: Notification) {
-        guard let window = notification.object as? NSWindow, window == onboardingWindow else {
-            return
+        guard let window = notification.object as? NSWindow else { return }
+
+        if window == onboardingWindow {
+            onboardingWindow = nil
+        } else if window == settingsWindow {
+            settingsWindow = nil
         }
-        onboardingWindow = nil
     }
 }
 
