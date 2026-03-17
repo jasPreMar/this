@@ -236,7 +236,7 @@ private struct PermissionsStep: View {
                     title: "Automation",
                     description: "Allow HyperPointer to control other apps via AppleScript.",
                     icon: "bolt.horizontal.circle",
-                    state: .action("Open Settings") {
+                    state: .action("Grant") {
                         viewModel.openAutomationSettings()
                     }
                 )
