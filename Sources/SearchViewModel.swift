@@ -14,6 +14,7 @@ class SearchViewModel: ObservableObject {
     @Published var hoveredApp: String = ""
     @Published var hoveredParts: [String] = []
     @Published var hoveredContextIcon: NSImage?
+    @Published var hoveredWorkingDirectoryURL: URL?
     @Published var selectedText: String = ""
     @Published var isChatMode = false
     @Published var isCommandKeyMode = false
@@ -27,6 +28,7 @@ class SearchViewModel: ObservableObject {
     @Published var voiceState: VoiceState = .idle
     @Published var voiceLevel: CGFloat = 0
     var currentSessionId: String?
+    var currentSessionWorkingDirectoryURL: URL?
     var onContentSizeChange: ((CGSize) -> Void)?
     var onClaudeManagerChange: ((ClaudeProcessManager?) -> Void)?
     private var hoveredAppPID: pid_t = 0
@@ -38,7 +40,7 @@ class SearchViewModel: ObservableObject {
     private let staleThreshold = 3
 
     /// Set by FloatingPanel
-    var onSubmit: ((String, URL?) -> Void)?
+    var onSubmit: ((String, URL?, URL?) -> Void)?
     var onClose: (() -> Void)?
     var onMessageSent: (() -> Void)?
     var onStreamingComplete: (() -> Void)?
@@ -74,12 +76,16 @@ class SearchViewModel: ObservableObject {
                 self?.onStreamingComplete?()
             }
             claudeManager = manager
-            manager.start(message: message, resumeSessionId: currentSessionId)
+            manager.start(
+                message: message,
+                resumeSessionId: currentSessionId,
+                workingDirectoryURL: currentSessionWorkingDirectoryURL
+            )
         } else {
             // First message — switch to chat mode
             let context = buildContextMessage()
             let (screenshotURL, _) = captureHoveredWindowScreenshot()
-            onSubmit?(context, screenshotURL)
+            onSubmit?(context, screenshotURL, hoveredWorkingDirectoryURL)
         }
     }
 
@@ -137,6 +143,7 @@ class SearchViewModel: ObservableObject {
         hoveredApp = homeName
         hoveredParts = [homeName]
         hoveredContextIcon = NSWorkspace.shared.icon(forFile: homeURL.path)
+        hoveredWorkingDirectoryURL = homeURL
         selectedText = ""
         hoveredAppPID = 0
     }
@@ -254,6 +261,7 @@ class SearchViewModel: ObservableObject {
             hoveredApp = ""
             hoveredParts = []
             hoveredContextIcon = nil
+            hoveredWorkingDirectoryURL = nil
             consecutiveContainerResults = 0
             lastContainerRole = ""
             return
@@ -296,6 +304,7 @@ class SearchViewModel: ObservableObject {
         } else {
             hoveredContextIcon = nil
         }
+        hoveredWorkingDirectoryURL = resolveWorkingDirectory(for: resolvedElement, pid: pid)
 
         // Build a description from the element hierarchy
         let description = describeElement(resolvedElement)
@@ -592,6 +601,72 @@ class SearchViewModel: ObservableObject {
         }
 
         return ""
+    }
+
+    private func resolveWorkingDirectory(for element: AXUIElement, pid: pid_t) -> URL? {
+        let (primary, ancestors) = resolveElement(element)
+
+        for candidate in [primary, element] + ancestors {
+            if let url = localFilesystemURL(from: candidate),
+               let workingDirectoryURL = normalizedWorkingDirectoryURL(from: url) {
+                return workingDirectoryURL
+            }
+        }
+
+        let appElement = AXUIElementCreateApplication(pid)
+        if let focusedWindow = axValue(appElement, key: kAXFocusedWindowAttribute),
+           let url = localFilesystemURL(from: focusedWindow as! AXUIElement),
+           let workingDirectoryURL = normalizedWorkingDirectoryURL(from: url) {
+            return workingDirectoryURL
+        }
+
+        return nil
+    }
+
+    private func localFilesystemURL(from element: AXUIElement) -> URL? {
+        if let url = axValue(element, key: "AXURL") as? URL, url.isFileURL {
+            return url
+        }
+        if let rawURL = axValue(element, key: "AXURL") as? String,
+           let url = parseFilesystemURL(rawURL) {
+            return url
+        }
+        if let document = axValue(element, key: "AXDocument") as? String,
+           let url = parseFilesystemURL(document) {
+            return url
+        }
+        if let filename = axValue(element, key: "AXFilename") as? String,
+           let url = parseFilesystemURL(filename) {
+            return url
+        }
+        return nil
+    }
+
+    private func parseFilesystemURL(_ rawValue: String) -> URL? {
+        if rawValue.hasPrefix("/") {
+            return URL(fileURLWithPath: rawValue)
+        }
+        if let url = URL(string: rawValue), url.isFileURL {
+            return url
+        }
+        return nil
+    }
+
+    private func normalizedWorkingDirectoryURL(from url: URL) -> URL? {
+        let resolvedURL = url.standardizedFileURL.resolvingSymlinksInPath()
+        let path = resolvedURL.path
+        var isDirectory: ObjCBool = false
+
+        if FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory) {
+            return isDirectory.boolValue ? resolvedURL : resolvedURL.deletingLastPathComponent()
+        }
+
+        if resolvedURL.hasDirectoryPath {
+            return resolvedURL
+        }
+
+        let parentURL = resolvedURL.deletingLastPathComponent()
+        return parentURL.path.isEmpty ? nil : parentURL
     }
 
     private func findAddressBar(in element: AXUIElement) -> String? {
