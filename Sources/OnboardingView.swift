@@ -6,130 +6,85 @@ struct OnboardingView: View {
 
     private let steps = [
         "Welcome",
+        "Claude",
         "Permissions",
-        "Automation",
-        "Try it"
+        "Tutorial"
     ]
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 0) {
-                sidebar
-                Divider()
-                content
-            }
-
-            Divider()
+            content
             footer
         }
-        .frame(width: 760, height: 560)
-        .background(Color(nsColor: .windowBackgroundColor))
-    }
-
-    private var sidebar: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("HyperPointer")
-                .font(.system(size: 20, weight: .semibold))
-
-            Text("Alpha setup")
-                .font(.system(size: 12))
-                .foregroundStyle(.secondary)
-
-            VStack(alignment: .leading, spacing: 8) {
-                ForEach(Array(steps.enumerated()), id: \.offset) { index, title in
-                    Button {
-                        viewModel.currentStep = index
-                    } label: {
-                        HStack(spacing: 10) {
-                            Text("\(index + 1)")
-                                .font(.system(size: 12, weight: .semibold))
-                                .frame(width: 22, height: 22)
-                                .background(index == viewModel.currentStep ? Color.accentColor : Color.secondary.opacity(0.12))
-                                .foregroundStyle(index == viewModel.currentStep ? Color.white : Color.primary)
-                                .clipShape(Circle())
-
-                            Text(title)
-                                .font(.system(size: 13, weight: index == viewModel.currentStep ? .semibold : .regular))
-                                .foregroundStyle(.primary)
-
-                            Spacer(minLength: 0)
-                        }
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 8)
-                        .background(index == viewModel.currentStep ? Color.accentColor.opacity(0.1) : Color.clear)
-                        .clipShape(RoundedRectangle(cornerRadius: 10))
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .padding(.top, 8)
-
-            Spacer()
-
-            VStack(alignment: .leading, spacing: 8) {
-                SummaryBadge(
-                    title: "Claude CLI",
-                    value: viewModel.isClaudeInstalled ? "Ready" : "Missing",
-                    isReady: viewModel.isClaudeInstalled
-                )
-                SummaryBadge(
-                    title: "Core Permissions",
-                    value: viewModel.coreRequirementsReady ? "Ready" : "Needs setup",
-                    isReady: viewModel.coreRequirementsReady
-                )
-                SummaryBadge(
-                    title: "Automation Apps",
-                    value: viewModel.hasAutomationTargets ? "\(viewModel.automationApps.count) found" : "Scanning installed apps",
-                    isReady: viewModel.hasAutomationTargets
-                )
-            }
-        }
-        .padding(20)
-        .frame(width: 220, alignment: .topLeading)
-        .background(Color.black.opacity(0.02))
+        .frame(width: 618, height: 768)
+        .background(
+            LinearGradient(
+                colors: [
+                    Color.white,
+                    Color(red: 0.985, green: 0.985, blue: 0.99)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+        )
     }
 
     @ViewBuilder
     private var content: some View {
-        switch viewModel.currentStep {
-        case 0:
-            WelcomeStep(viewModel: viewModel)
-        case 1:
-            PermissionsStep(viewModel: viewModel)
-        case 2:
-            AutomationStep(viewModel: viewModel)
-        default:
-            FinishStep(viewModel: viewModel)
+        Group {
+            switch viewModel.currentStep {
+            case 0:
+                WelcomeStep(viewModel: viewModel)
+            case 1:
+                ClaudeSetupStep(viewModel: viewModel)
+            case 2:
+                PermissionsStep(viewModel: viewModel)
+            default:
+                FinishStep(viewModel: viewModel)
+            }
         }
+        .contentShape(Rectangle())
     }
 
     private var footer: some View {
-        HStack {
-            Button("Skip for now") {
-                viewModel.finish()
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
-
-            Spacer()
-
-            if viewModel.currentStep > 0 {
-                Button("Back") {
-                    viewModel.previousStep()
+        HStack(alignment: .center) {
+            Group {
+                if viewModel.currentStep > 0 {
+                    Button {
+                        viewModel.previousStep()
+                    } label: {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 18, weight: .semibold))
+                            .frame(width: 32, height: 32)
+                            .foregroundStyle(Color.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .onboardingClickableCursor()
+                } else {
+                    Color.clear
+                        .frame(width: 32, height: 32)
                 }
             }
 
-            Button(viewModel.currentStep == steps.count - 1 ? "Finish Setup" : "Next") {
+            Spacer()
+
+            PaginationDots(currentStep: viewModel.currentStep, count: steps.count)
+
+            Spacer()
+
+            Button(viewModel.currentStep == steps.count - 1 ? "Finish" : "Next") {
                 if viewModel.currentStep == steps.count - 1 {
                     viewModel.finish()
                 } else {
                     viewModel.nextStep()
                 }
             }
+            .buttonStyle(OnboardingPrimaryButtonStyle())
             .keyboardShortcut(.defaultAction)
+            .onboardingClickableCursor()
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 14)
+        .padding(.horizontal, 28)
+        .padding(.vertical, 20)
     }
 }
 
@@ -137,63 +92,65 @@ private struct WelcomeStep: View {
     @ObservedObject var viewModel: OnboardingViewModel
 
     var body: some View {
-        ScrollView(.vertical) {
-            VStack(alignment: .leading, spacing: 20) {
-                Text("Get HyperPointer ready")
-                    .font(.system(size: 30, weight: .semibold))
+        OnboardingPageScaffold(
+            title: "Welcome to HyperPointer",
+            subtitle: "HyperPointer is a powerful local assistant that reads context from your Mac and helps you act on what is on screen."
+        ) {
+            SecurityNoticeCard(
+                title: "Security notice",
+                message: "The connected AI agent can trigger powerful actions on your Mac, including running commands, reading and writing files, and capturing screenshots depending on the permissions you grant.\n\nOnly enable HyperPointer if you understand the risks and trust the prompts and integrations you use."
+            )
+        }
+    }
+}
 
-                Text("This alpha works best when Claude CLI is installed, the core permissions are granted, and the apps you want to control are pre-approved for Automation.")
-                    .font(.system(size: 14))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+private struct ClaudeSetupStep: View {
+    @ObservedObject var viewModel: OnboardingViewModel
 
-                setupBlock(
-                    title: "What the wizard does",
-                    body: "It walks through the minimum setup needed to point at something on screen, ask HyperPointer to act on it, and avoid surprise permission prompts in the middle of a task."
-                )
+    var body: some View {
+        OnboardingPageScaffold(
+            title: "Choose your setup",
+            subtitle: "HyperPointer works best when Claude CLI is available on this Mac. You can use this Mac now or configure it later."
+        ) {
+            VStack(alignment: .leading, spacing: 0) {
+                SetupChoiceRow(
+                    title: "This Mac",
+                    subtitle: viewModel.isClaudeInstalled
+                        ? "Claude CLI is installed and ready to use on this Mac."
+                        : "Use Claude CLI on this Mac. Install it first if you have not already.",
+                    isSelected: viewModel.claudeSetupChoice == .thisMac
+                ) {
+                    viewModel.claudeSetupChoice = .thisMac
+                }
 
-                setupBlock(
-                    title: "What is required now",
-                    body: "Claude CLI, Accessibility, and Screen Recording are the core pieces. Microphone and Speech Recognition are only needed for invoke-key voice input."
-                )
+                Divider()
+                    .padding(.horizontal, 18)
 
-                HStack(spacing: 12) {
-                    statusTile(title: "Claude CLI", subtitle: viewModel.isClaudeInstalled ? "Installed" : "Install before using chat", isReady: viewModel.isClaudeInstalled)
-                    statusTile(title: "Core access", subtitle: viewModel.coreRequirementsReady ? "Ready to test" : "Needs setup", isReady: viewModel.coreRequirementsReady)
+                SetupChoiceRow(
+                    title: "Configure later",
+                    subtitle: "Skip Claude CLI for now and finish the rest of onboarding first.",
+                    isSelected: viewModel.claudeSetupChoice == .later
+                ) {
+                    viewModel.claudeSetupChoice = .later
+                }
+
+                if viewModel.claudeSetupChoice == .thisMac && !viewModel.isClaudeInstalled {
+                    Divider()
+                        .padding(.horizontal, 18)
+
+                    Button("Advanced...") {
+                        viewModel.requestClaudeInstall()
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Color.accentColor)
+                    .onboardingClickableCursor()
+                    .padding(.horizontal, 18)
+                    .padding(.top, 16)
+                    .padding(.bottom, 18)
                 }
             }
-            .padding(28)
+            .cardStyle()
         }
-    }
-
-    private func setupBlock(title: String, body: String) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(title)
-                .font(.system(size: 16, weight: .semibold))
-            Text(body)
-                .font(.system(size: 13))
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .padding(18)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.secondary.opacity(0.08))
-        .clipShape(RoundedRectangle(cornerRadius: 14))
-    }
-
-    private func statusTile(title: String, subtitle: String, isReady: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            SetupStatusPill(text: isReady ? "Ready" : "Needs setup", isReady: isReady)
-            Text(title)
-                .font(.system(size: 16, weight: .semibold))
-            Text(subtitle)
-                .font(.system(size: 13))
-                .foregroundStyle(.secondary)
-        }
-        .padding(18)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.secondary.opacity(0.08))
-        .clipShape(RoundedRectangle(cornerRadius: 14))
     }
 }
 
@@ -201,187 +158,302 @@ private struct PermissionsStep: View {
     @ObservedObject var viewModel: OnboardingViewModel
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                Text("Permissions and prerequisites")
-                    .font(.system(size: 28, weight: .semibold))
-
-                Text("Grant the core access first. HyperPointer uses these to read what is under your cursor, capture the window you are looking at, and send your prompt to Claude.")
-                    .font(.system(size: 14))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                PermissionRow(
-                    title: "Claude CLI",
-                    description: "HyperPointer shells out to Claude for every conversation. Install the CLI before testing the app.",
-                    statusText: viewModel.isClaudeInstalled ? "Ready" : "Missing",
-                    isReady: viewModel.isClaudeInstalled,
-                    primaryTitle: viewModel.isClaudeInstalled ? "Refresh" : "Install Claude",
-                    secondaryTitle: viewModel.isClaudeInstalled ? nil : "Refresh",
-                    primaryAction: {
-                        if viewModel.isClaudeInstalled {
-                            viewModel.refresh()
-                        } else {
-                            viewModel.openClaudeInstallGuide()
-                        }
-                    },
-                    secondaryAction: viewModel.isClaudeInstalled ? nil : { viewModel.refresh() }
+        OnboardingPageScaffold(
+            title: "Grant permissions",
+            subtitle: "These macOS permissions let HyperPointer automate apps and capture context on this Mac."
+        ) {
+            VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: 0) {
+                PermissionStatusRow(
+                    title: "Automation (AppleScript)",
+                    description: "Approve per-app later when HyperPointer asks to control another app.",
+                    icon: "bolt.horizontal.circle",
+                    state: .informational("Later")
                 )
 
-                PermissionRow(
+                Divider()
+                    .padding(.leading, 64)
+
+                PermissionStatusRow(
                     title: "Accessibility",
-                    description: "Lets HyperPointer inspect the UI element under your pointer and listen for the global right-click gesture.",
-                    statusText: viewModel.isAccessibilityGranted ? "Ready" : "Needs approval",
-                    isReady: viewModel.isAccessibilityGranted,
-                    primaryTitle: viewModel.isAccessibilityGranted ? "Open Settings" : "Grant Access",
-                    secondaryTitle: "Refresh",
-                    primaryAction: {
-                        if viewModel.isAccessibilityGranted {
-                            viewModel.openAccessibilitySettings()
-                        } else {
+                    description: "Control UI elements and inspect what is under your pointer.",
+                    icon: "hand.raised",
+                    state: permissionState(
+                        isGranted: viewModel.isAccessibilityGranted,
+                        isBusy: viewModel.isAccessibilityRequestInFlight
+                    ) {
+                        if !viewModel.isAccessibilityGranted {
                             viewModel.requestAccessibility()
                         }
-                    },
-                    secondaryAction: { viewModel.refresh() }
+                    }
                 )
 
-                PermissionRow(
+                Divider()
+                    .padding(.leading, 64)
+
+                PermissionStatusRow(
                     title: "Screen Recording",
-                    description: "Allows HyperPointer to include the visible window in the context it sends to Claude. macOS may require a relaunch after this changes.",
-                    statusText: viewModel.isScreenRecordingGranted ? "Ready" : "Needs approval",
-                    isReady: viewModel.isScreenRecordingGranted,
-                    primaryTitle: viewModel.isScreenRecordingGranted ? "Open Settings" : "Grant Access",
-                    secondaryTitle: "Refresh",
-                    primaryAction: {
-                        if viewModel.isScreenRecordingGranted {
-                            viewModel.openScreenRecordingSettings()
-                        } else {
+                    description: "Capture the visible window for context and screenshots.",
+                    icon: "display",
+                    state: permissionState(
+                        isGranted: viewModel.isScreenRecordingGranted,
+                        isBusy: viewModel.isScreenRecordingRequestInFlight
+                    ) {
+                        if !viewModel.isScreenRecordingGranted {
                             viewModel.requestScreenRecording()
                         }
-                    },
-                    secondaryAction: { viewModel.refresh() }
+                    }
                 )
 
-                PermissionRow(
+                Divider()
+                    .padding(.leading, 64)
+
+                PermissionStatusRow(
                     title: "Microphone",
-                    description: "Optional. Required only if you want voice input while holding your invoke key.",
-                    statusText: viewModel.statusLabel(for: viewModel.microphoneStatus),
-                    isReady: viewModel.microphoneStatus == .authorized,
-                    primaryTitle: viewModel.microphoneStatus == .authorized ? "Open Settings" : "Grant Access",
-                    secondaryTitle: "Refresh",
-                    primaryAction: {
-                        if viewModel.microphoneStatus == .authorized {
-                            viewModel.openMicrophoneSettings()
-                        } else {
+                    description: "Allow voice input while you hold your invoke key.",
+                    icon: "mic",
+                    state: permissionState(
+                        isGranted: viewModel.isMicrophoneGranted,
+                        isBusy: viewModel.isMicrophoneRequestInFlight
+                    ) {
+                        if !viewModel.isMicrophoneGranted {
                             viewModel.requestMicrophone()
                         }
-                    },
-                    secondaryAction: { viewModel.refresh() }
+                    }
                 )
 
-                PermissionRow(
+                Divider()
+                    .padding(.leading, 64)
+
+                PermissionStatusRow(
                     title: "Speech Recognition",
-                    description: "Optional. Used together with the microphone for invoke-key voice input.",
-                    statusText: viewModel.statusLabel(for: viewModel.speechStatus),
-                    isReady: viewModel.speechStatus == .authorized,
-                    primaryTitle: viewModel.speechStatus == .authorized ? "Open Settings" : "Grant Access",
-                    secondaryTitle: "Refresh",
-                    primaryAction: {
-                        if viewModel.speechStatus == .authorized {
-                            viewModel.openSpeechSettings()
-                        } else {
+                    description: "Transcribe dictated prompts on this Mac.",
+                    icon: "waveform",
+                    state: permissionState(
+                        isGranted: viewModel.isSpeechRecognitionGranted,
+                        isBusy: viewModel.isSpeechRecognitionRequestInFlight
+                    ) {
+                        if !viewModel.isSpeechRecognitionGranted {
                             viewModel.requestSpeechRecognition()
                         }
-                    },
-                    secondaryAction: { viewModel.refresh() }
+                    }
                 )
+                }
+                .cardStyle()
             }
-            .padding(28)
+        }
+    }
+
+    private func permissionState(
+        isGranted: Bool,
+        isBusy: Bool,
+        action: @escaping () -> Void
+    ) -> PermissionStatusRow.State {
+        if isGranted {
+            return .granted("Granted")
+        }
+        if isBusy || viewModel.isPreparingAppBundle {
+            return .inProgress
+        }
+        return .action("Grant", action)
+    }
+}
+
+private struct OnboardingPageScaffold<Content: View>: View {
+    let title: String
+    let subtitle: String
+    @ViewBuilder let content: Content
+
+    init(title: String, subtitle: String, @ViewBuilder content: () -> Content) {
+        self.title = title
+        self.subtitle = subtitle
+        self.content = content()
+    }
+
+    var body: some View {
+        ScrollView(.vertical, showsIndicators: false) {
+            VStack(spacing: 20) {
+                OnboardingHero()
+
+                VStack(spacing: 12) {
+                    Text(title)
+                        .font(.system(size: 28, weight: .semibold))
+                        .multilineTextAlignment(.center)
+
+                    Text(subtitle)
+                        .font(.system(size: 14))
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: 520)
+
+                content
+            }
+            .padding(.horizontal, 30)
+            .padding(.top, 26)
+            .padding(.bottom, 18)
         }
     }
 }
 
-private struct AutomationStep: View {
-    @ObservedObject var viewModel: OnboardingViewModel
+private struct OnboardingHero: View {
+    var body: some View {
+        ZStack {
+            Circle()
+                .fill(Color.accentColor.opacity(0.16))
+                .frame(width: 148, height: 148)
+                .blur(radius: 24)
+
+            Image(nsImage: NSApp.applicationIconImage)
+                .resizable()
+                .scaledToFit()
+                .frame(width: 96, height: 96)
+                .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+                .shadow(color: Color.accentColor.opacity(0.24), radius: 24, y: 10)
+        }
+        .frame(height: 124)
+    }
+}
+
+private struct SecurityNoticeCard: View {
+    let title: String
+    let message: String
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                HStack(alignment: .top) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Automation approvals")
-                            .font(.system(size: 28, weight: .semibold))
-                        Text("Open the apps you care about, then grant Automation one app at a time. This front-loads the macOS approval prompt instead of showing it during the first real task.")
-                            .font(.system(size: 14))
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
+        HStack(alignment: .top, spacing: 14) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(Color.orange)
+                .frame(width: 30, height: 30)
+                .background(Color.orange.opacity(0.12))
+                .clipShape(Circle())
 
-                    Spacer()
-
-                    Button("Refresh List") {
-                        viewModel.refresh()
-                    }
-                }
-
-                HStack(spacing: 10) {
-                    Button("Open Automation Settings") {
-                        viewModel.openAutomationSettings()
-                    }
-                    .buttonStyle(.link)
-
-                    Text("Every installed app is listed here. Running apps get an extra badge.")
-                        .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
-                }
-
-                TextField("Search apps", text: $viewModel.automationSearchQuery)
-                    .textFieldStyle(.roundedBorder)
-
-                if viewModel.isLoadingAutomationApps {
-                    HStack(spacing: 10) {
-                        ProgressView()
-                            .controlSize(.small)
-                        Text("Scanning installed applications…")
-                            .font(.system(size: 13))
-                            .foregroundStyle(.secondary)
-                    }
-                    .padding(.vertical, 4)
-                } else if viewModel.automationApps.isEmpty {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("No applications were found")
-                            .font(.system(size: 16, weight: .semibold))
-                        Text("Use Refresh List to rescan the standard Applications folders if the install changed while this window was open.")
-                            .font(.system(size: 13))
-                            .foregroundStyle(.secondary)
-                    }
-                    .padding(18)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color.secondary.opacity(0.08))
-                    .clipShape(RoundedRectangle(cornerRadius: 14))
-                } else if viewModel.filteredAutomationApps.isEmpty {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("No apps match that search")
-                            .font(.system(size: 16, weight: .semibold))
-                        Text("Try a shorter app name or search by bundle identifier.")
-                            .font(.system(size: 13))
-                            .foregroundStyle(.secondary)
-                    }
-                    .padding(18)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color.secondary.opacity(0.08))
-                    .clipShape(RoundedRectangle(cornerRadius: 14))
-                } else {
-                    VStack(spacing: 12) {
-                        ForEach(viewModel.filteredAutomationApps) { app in
-                            AutomationAppRow(app: app) {
-                                viewModel.requestAutomation(for: app)
-                            }
-                        }
-                    }
-                }
+            VStack(alignment: .leading, spacing: 8) {
+                Text(title)
+                    .font(.system(size: 16, weight: .semibold))
+                Text(message)
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            .padding(28)
+        }
+        .padding(18)
+        .cardStyle()
+    }
+}
+
+private struct SetupChoiceRow: View {
+    let title: String
+    let subtitle: String
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(alignment: .center, spacing: 14) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title)
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(.primary)
+                    Text(subtitle)
+                        .font(.system(size: 13))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer()
+
+                selectionIndicator
+            }
+            .padding(18)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(isSelected ? Color.accentColor.opacity(0.12) : Color.clear)
+            .contentShape(Rectangle())
+        }
+        .frame(maxWidth: .infinity)
+        .buttonStyle(.plain)
+        .onboardingClickableCursor()
+    }
+
+    @ViewBuilder
+    private var selectionIndicator: some View {
+        if isSelected {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(Color.accentColor)
+        } else {
+            Circle()
+                .stroke(Color.secondary.opacity(0.35), lineWidth: 2)
+                .frame(width: 18, height: 18)
+        }
+    }
+}
+
+private struct PermissionStatusRow: View {
+    enum State {
+        case granted(String)
+        case inProgress
+        case action(String, () -> Void)
+        case informational(String)
+    }
+
+    let title: String
+    let description: String
+    let icon: String
+    let state: State
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 14) {
+            ZStack {
+                Circle()
+                    .fill(Color.secondary.opacity(0.12))
+                    .frame(width: 36, height: 36)
+
+                Image(systemName: icon)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(Color.secondary)
+            }
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.system(size: 15, weight: .semibold))
+                Text(description)
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer(minLength: 12)
+
+            trailingView
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 14)
+    }
+
+    @ViewBuilder
+    private var trailingView: some View {
+        switch state {
+        case .granted(let text):
+            HStack(spacing: 6) {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(Color.green)
+                Text(text)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(Color.green)
+            }
+        case .inProgress:
+            ProgressView()
+                .controlSize(.small)
+        case .action(let title, let action):
+            Button(title, action: action)
+                .buttonStyle(PermissionGrantButtonStyle())
+                .onboardingClickableCursor()
+        case .informational(let text):
+            Text(text)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(.secondary)
         }
     }
 }
@@ -490,19 +562,28 @@ private struct FinishStep: View {
     @StateObject private var tutorial = TutorialState()
 
     var body: some View {
-        VStack(spacing: 0) {
-            invokeKeyCard
+        OnboardingPageScaffold(
+            title: "Try HyperPointer",
+            subtitle: "Choose your invoke key, then practice the flow before you start using it in real tasks."
+        ) {
+            VStack(spacing: 16) {
+                invokeKeyCard
+                    .cardStyle()
 
-            ZStack {
-                if tutorial.phase == .holdCommand {
-                    holdCommandView
-                        .transition(.opacity)
-                } else {
-                    desktopView
-                        .transition(.opacity)
+                ZStack {
+                    if tutorial.phase == .holdCommand {
+                        holdCommandView
+                            .transition(.opacity)
+                    } else {
+                        desktopView
+                            .transition(.opacity)
+                    }
                 }
+                .frame(height: 360)
+                .frame(maxWidth: .infinity)
+                .background(Color(red: 0.12, green: 0.12, blue: 0.14))
+                .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .animation(.easeOut(duration: 0.3), value: tutorial.phase)
         .animation(.easeOut(duration: 0.15), value: tutorial.hoveredItem?.id)
@@ -529,10 +610,10 @@ private struct FinishStep: View {
             }
             .pickerStyle(.menu)
             .frame(width: 160)
+            .onboardingClickableCursor()
         }
         .padding(.horizontal, 28)
-        .padding(.top, 24)
-        .padding(.bottom, 12)
+        .padding(.vertical, 18)
     }
 
     // MARK: - Hold Command Phase
@@ -542,12 +623,13 @@ private struct FinishStep: View {
             Spacer()
             Text(viewModel.invokeHotKey.symbol)
                 .font(.system(size: 56, weight: .medium, design: .rounded))
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(Color.white.opacity(0.2))
             Text(viewModel.invokeHotKey.holdLabel)
                 .font(.system(size: 24, weight: .semibold))
+                .foregroundStyle(Color.white.opacity(0.9))
             Text("You should see a little icon appear next to your cursor.")
                 .font(.system(size: 14))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Color.white.opacity(0.55))
                 .multilineTextAlignment(.center)
             Spacer()
         }
@@ -676,122 +758,67 @@ private struct FinishStep: View {
 
 }
 
-private struct PermissionRow: View {
-    let title: String
-    let description: String
-    let statusText: String
-    let isReady: Bool
-    let primaryTitle: String
-    let secondaryTitle: String?
-    let primaryAction: () -> Void
-    let secondaryAction: (() -> Void)?
+private struct PaginationDots: View {
+    let currentStep: Int
+    let count: Int
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack(spacing: 10) {
-                        Text(title)
-                            .font(.system(size: 16, weight: .semibold))
-                        SetupStatusPill(text: statusText, isReady: isReady)
-                    }
-
-                    Text(description)
-                        .font(.system(size: 13))
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-
-                Spacer(minLength: 20)
-            }
-
-            HStack(spacing: 10) {
-                Button(primaryTitle, action: primaryAction)
-                if let secondaryTitle, let secondaryAction {
-                    Button(secondaryTitle, action: secondaryAction)
-                }
+        HStack(spacing: 8) {
+            ForEach(0..<count, id: \.self) { index in
+                Circle()
+                    .fill(index == currentStep ? Color.accentColor : Color.secondary.opacity(0.22))
+                    .frame(width: 8, height: 8)
             }
         }
-        .padding(18)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.secondary.opacity(0.08))
-        .clipShape(RoundedRectangle(cornerRadius: 14))
     }
 }
 
-private struct AutomationAppRow: View {
-    let app: AutomationApp
-    let action: () -> Void
+private struct OnboardingPrimaryButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 16, weight: .semibold))
+            .foregroundStyle(Color.white)
+            .frame(width: 110, height: 42)
+            .background(
+                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                    .fill(Color.accentColor.opacity(configuration.isPressed ? 0.84 : 1))
+            )
+    }
+}
 
-    var body: some View {
-        HStack(spacing: 12) {
-            if let icon = app.icon {
-                Image(nsImage: icon)
-                    .resizable()
-                    .frame(width: 32, height: 32)
-                    .clipShape(RoundedRectangle(cornerRadius: 7))
+private struct PermissionGrantButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 13, weight: .semibold))
+            .foregroundStyle(Color.primary)
+            .padding(.horizontal, 14)
+            .frame(height: 30)
+            .background(
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .fill(Color.secondary.opacity(configuration.isPressed ? 0.16 : 0.12))
+            )
+    }
+}
+
+private extension View {
+    func cardStyle() -> some View {
+        self
+            .background(Color.white.opacity(0.96))
+            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    .stroke(Color.black.opacity(0.035), lineWidth: 1)
+            )
+            .shadow(color: Color.black.opacity(0.06), radius: 28, y: 10)
+    }
+
+    func onboardingClickableCursor() -> some View {
+        onHover { hovering in
+            if hovering {
+                NSCursor.pointingHand.push()
             } else {
-                RoundedRectangle(cornerRadius: 7)
-                    .fill(Color.secondary.opacity(0.15))
-                    .frame(width: 32, height: 32)
+                NSCursor.pop()
             }
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text(app.name)
-                    .font(.system(size: 14, weight: .semibold))
-                Text(app.bundleIdentifier)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-            }
-
-            Spacer()
-
-            if app.isRunning {
-                SetupStatusPill(text: "Open", isReady: true)
-            }
-            SetupStatusPill(text: app.isGranted ? "Ready" : "Pending", isReady: app.isGranted)
-
-            Button(app.isGranted ? "Retry" : "Allow", action: action)
         }
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.secondary.opacity(0.08))
-        .clipShape(RoundedRectangle(cornerRadius: 14))
-    }
-}
-
-private struct SetupStatusPill: View {
-    let text: String
-    let isReady: Bool
-
-    var body: some View {
-        Text(text)
-            .font(.system(size: 11, weight: .semibold))
-            .padding(.horizontal, 9)
-            .padding(.vertical, 4)
-            .background(isReady ? Color.green.opacity(0.18) : Color.orange.opacity(0.18))
-            .foregroundStyle(isReady ? Color.green : Color.orange)
-            .clipShape(Capsule())
-    }
-}
-
-private struct SummaryBadge: View {
-    let title: String
-    let value: String
-    let isReady: Bool
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(title)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(.secondary)
-            Text(value)
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(isReady ? Color.primary : Color.orange)
-        }
-        .padding(10)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.white.opacity(0.6))
-        .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 }

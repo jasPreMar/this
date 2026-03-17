@@ -96,6 +96,15 @@ mkdir -p "$MACOS_PATH" "$RESOURCES_PATH"
 cp "$BINARY_PATH" "$MACOS_PATH/$APP_NAME"
 cp "$ROOT_DIR/Sources/Info.plist" "$CONTENTS_PATH/Info.plist"
 
+# Embed Sparkle.framework so the packaged app can launch from the dev bundle.
+SPARKLE_FRAMEWORK="$(find "$ROOT_DIR/.build/artifacts" -name "Sparkle.framework" -type d 2>/dev/null | head -1)"
+if [[ -n "$SPARKLE_FRAMEWORK" ]]; then
+  FRAMEWORKS_PATH="$CONTENTS_PATH/Frameworks"
+  mkdir -p "$FRAMEWORKS_PATH"
+  rm -rf "$FRAMEWORKS_PATH/Sparkle.framework"
+  cp -R "$SPARKLE_FRAMEWORK" "$FRAMEWORKS_PATH/"
+fi
+
 codesign \
   --force \
   --deep \
