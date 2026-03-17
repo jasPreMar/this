@@ -450,7 +450,6 @@ extension AppDelegate: NSWindowDelegate {
             return
         }
         onboardingWindow = nil
-        UserDefaults.standard.set(true, forKey: onboardingSeenKey)
     }
 }
 
