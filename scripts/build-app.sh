@@ -92,6 +92,7 @@ rm -rf "$APP_PATH"
 mkdir -p "$MACOS_PATH" "$RESOURCES_PATH"
 cp "$BINARY_PATH" "$MACOS_PATH/$APP_NAME"
 cp "$ROOT_DIR/Sources/Info.plist" "$CONTENTS_PATH/Info.plist"
+cp "$ROOT_DIR/Sources/Resources"/*.wav "$RESOURCES_PATH/"
 
 # Embed Sparkle.framework (extracted by SPM into .build/artifacts/)
 SPARKLE_FRAMEWORK="$(find "$ROOT_DIR/.build/artifacts" -name "Sparkle.framework" -type d 2>/dev/null | head -1)"

@@ -35,6 +35,7 @@ class SearchViewModel: ObservableObject {
     /// Set by FloatingPanel
     var onSubmit: ((String, URL?) -> Void)?
     var onClose: (() -> Void)?
+    var onMessageSent: (() -> Void)?
 
     var isVoiceModeActive: Bool {
         switch voiceState {
@@ -48,6 +49,7 @@ class SearchViewModel: ObservableObject {
     func submitMessage() {
         let message = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !message.isEmpty else { return }
+        onMessageSent?()
 
         if isChatMode {
             // Follow-up message — resume the existing session

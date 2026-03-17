@@ -165,6 +165,7 @@ class FloatingPanel: NSPanel {
     var isCommandKeyHeld = false
     var onCommandKeyDropped: (() -> Void)?
     var onFeedbackShake: (() -> Void)?
+    var onMessageSent: (() -> Void)?
 
     init() {
         super.init(
@@ -190,6 +191,9 @@ class FloatingPanel: NSPanel {
                 message: context,
                 screenshotURL: screenshotURL
             )
+        }
+        searchViewModel.onMessageSent = { [weak self] in
+            self?.onMessageSent?()
         }
         searchViewModel.onClose = { [weak self] in
             self?.close()
