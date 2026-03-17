@@ -48,9 +48,15 @@ private func rightClickCallback(
 }
 
 class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
+    private enum CommandMenuPresentationSource {
+        case statusItem
+        case invokeHotKey
+    }
+
     var panels: [FloatingPanel] = []
     @Published private(set) var taskRecords: [TaskSessionRecord] = []
     var hotKeyMonitor: Any?
+    private var localHotKeyMonitor: Any?
     fileprivate var eventTap: CFMachPort?
     private var flagsMonitor: Any?
     private var localFlagsMonitor: Any?
@@ -82,20 +88,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         setupRightClickTapIfNeeded()
         showOnboardingIfNeeded()
 
-        // Global hotkey: Control + Space to create new panel
+        // Global hotkey: selected invoke key + Space toggles the task overlay.
         hotKeyMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            if event.modifierFlags.contains(.control) && event.keyCode == 49 {
-                self?.createNewPanel()
-            }
+            self?.handleGlobalKeyDown(event)
         }
 
-        // Also monitor local events so it works when our app is active
-        NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            if event.modifierFlags.contains(.control) && event.keyCode == 49 {
-                self?.createNewPanel()
-                return nil
-            }
-            return event
+        // Also monitor local events so it works when our app is active.
+        localHotKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            self?.handleLocalKeyDown(event) ?? event
         }
 
         // Hold the selected invoke key to activate the panel and voice capture; release to anchor the panel for editing.
@@ -111,6 +111,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     private func handleFlagsChanged(_ event: NSEvent) {
         let modifierFlags = event.modifierFlags
         let invokeKeyDown = InvokeHotKey.stored().isPressed(in: modifierFlags)
+        if commandMenuPanel?.isVisible == true {
+            if !invokeKeyDown {
+                commandKeyHeld = false
+                commandKeyPanel = nil
+            }
+            return
+        }
+
         if invokeKeyDown && !commandKeyHeld {
             commandKeyHeld = true
 
@@ -139,6 +147,25 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             }
             commandKeyPanel = nil
         }
+    }
+
+    private func handleGlobalKeyDown(_ event: NSEvent) {
+        guard event.keyCode == 49,
+              InvokeHotKey.stored().isPressed(in: event.modifierFlags) else { return }
+
+        DispatchQueue.main.async { [weak self] in
+            self?.toggleCommandMenu(from: .invokeHotKey)
+        }
+    }
+
+    private func handleLocalKeyDown(_ event: NSEvent) -> NSEvent? {
+        guard event.keyCode == 49,
+              InvokeHotKey.stored().isPressed(in: event.modifierFlags) else {
+            return event
+        }
+
+        toggleCommandMenu(from: .invokeHotKey)
+        return nil
     }
 
     // MARK: - Main Menu (key equivalents for text editing)
@@ -270,7 +297,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
 
     @objc private func handleStatusItemClick(_ sender: NSStatusBarButton) {
         guard let event = NSApp.currentEvent else {
-            toggleCommandMenu()
+            toggleCommandMenu(from: .statusItem)
             return
         }
 
@@ -285,7 +312,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
                 )
             }
         default:
-            toggleCommandMenu()
+            toggleCommandMenu(from: .statusItem)
         }
     }
 
@@ -423,17 +450,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         NSApp.activate(ignoringOtherApps: true)
     }
 
-    private func toggleCommandMenu() {
+    private func toggleCommandMenu(from source: CommandMenuPresentationSource) {
         if commandMenuPanel?.isVisible == true {
             closeCommandMenu()
         } else {
-            showCommandMenu()
+            showCommandMenu(from: source)
         }
     }
 
-    private func showCommandMenu() {
-        guard let statusButton = statusItem?.button else { return }
-
+    private func showCommandMenu(from source: CommandMenuPresentationSource) {
         if commandMenuPanel == nil {
             let panel = CommandMenuPanel(
                 contentRect: NSRect(x: 0, y: 0, width: 720, height: 520),
@@ -455,30 +480,68 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             commandMenuPanel = panel
         }
 
+        if source == .invokeHotKey {
+            dismissCommandKeyPanelForCommandMenu()
+        }
         commandMenuPanel?.contentView = NSHostingView(rootView: CommandMenuView(appDelegate: self))
-        positionCommandMenu(relativeTo: statusButton)
+        positionCommandMenu(for: source)
         installCommandMenuEventMonitors()
         commandMenuPanel?.makeKeyAndOrderFront(nil)
-        statusButton.highlight(true)
+        statusItem?.button?.highlight(source == .statusItem)
         NSApp.activate(ignoringOtherApps: true)
     }
 
-    private func positionCommandMenu(relativeTo statusButton: NSStatusBarButton) {
+    private func positionCommandMenu(for source: CommandMenuPresentationSource) {
         guard let panel = commandMenuPanel,
-              let buttonWindow = statusButton.window else { return }
+              let origin = commandMenuOrigin(for: source) else { return }
 
-        let buttonFrame = buttonWindow.frame
-        let targetScreen = NSScreen.screens.first(where: { $0.frame.intersects(buttonFrame) }) ?? NSScreen.main
-        let visibleFrame = targetScreen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? .zero
-
-        var origin = NSPoint(
-            x: buttonFrame.midX - panel.frame.width / 2,
-            y: buttonFrame.minY - panel.frame.height - 8
-        )
-
-        origin.x = max(visibleFrame.minX + 8, min(origin.x, visibleFrame.maxX - panel.frame.width - 8))
-        origin.y = max(visibleFrame.minY + 8, min(origin.y, visibleFrame.maxY - panel.frame.height - 8))
+        panel.setRestingOrigin(origin, snapBackEnabled: source == .invokeHotKey)
         panel.setFrameOrigin(origin)
+    }
+
+    private func commandMenuOrigin(for source: CommandMenuPresentationSource) -> NSPoint? {
+        guard let panel = commandMenuPanel else { return nil }
+
+        switch source {
+        case .statusItem:
+            guard let statusButton = statusItem?.button,
+                  let buttonWindow = statusButton.window else { return nil }
+
+            let buttonFrame = buttonWindow.frame
+            let targetScreen = NSScreen.screens.first(where: { $0.frame.intersects(buttonFrame) }) ?? NSScreen.main
+            let visibleFrame = targetScreen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? .zero
+
+            var origin = NSPoint(
+                x: buttonFrame.midX - panel.frame.width / 2,
+                y: buttonFrame.minY - panel.frame.height - 8
+            )
+            origin.x = max(visibleFrame.minX + 8, min(origin.x, visibleFrame.maxX - panel.frame.width - 8))
+            origin.y = max(visibleFrame.minY + 8, min(origin.y, visibleFrame.maxY - panel.frame.height - 8))
+            return origin
+
+        case .invokeHotKey:
+            let targetScreen = NSScreen.screens.first(where: { $0.frame.contains(NSEvent.mouseLocation) }) ?? NSScreen.main
+            let visibleFrame = targetScreen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? .zero
+            let topInset: CGFloat = 88
+            let horizontalInset: CGFloat = 8
+
+            let unclampedX = visibleFrame.midX - panel.frame.width / 2
+            let unclampedY = visibleFrame.maxY - panel.frame.height - topInset
+            return NSPoint(
+                x: max(visibleFrame.minX + horizontalInset, min(unclampedX, visibleFrame.maxX - panel.frame.width - horizontalInset)),
+                y: max(visibleFrame.minY + horizontalInset, min(unclampedY, visibleFrame.maxY - panel.frame.height - horizontalInset))
+            )
+        }
+    }
+
+    private func dismissCommandKeyPanelForCommandMenu() {
+        commandKeyHeld = false
+
+        if let panel = commandKeyPanel {
+            panel.isCommandKeyHeld = false
+            panel.dismiss(restorePreviousFocus: false)
+            commandKeyPanel = nil
+        }
     }
 
     private func installCommandMenuEventMonitors() {

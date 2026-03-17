@@ -3,12 +3,98 @@ import SwiftUI
 
 final class CommandMenuPanel: NSPanel {
     var onEscape: (() -> Void)?
+    private var dragStartMonitor: Any?
+    private var pendingDragEvent: NSEvent?
+    private var restingOrigin: NSPoint?
+    private var snapBackThreshold: CGFloat = 0
+    private var shouldSnapBackToRestingOrigin = false
 
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
 
+    override func sendEvent(_ event: NSEvent) {
+        if event.type == .leftMouseDown {
+            cancelPendingDrag()
+            let hit = contentView?.hitTest(event.locationInWindow)
+            if !isScrollOrTextInput(hit) {
+                pendingDragEvent = event
+                dragStartMonitor = NSEvent.addLocalMonitorForEvents(
+                    matching: [.leftMouseDragged, .leftMouseUp]
+                ) { [weak self] nextEvent in
+                    guard let self else { return nextEvent }
+                    if nextEvent.type == .leftMouseDragged,
+                       let original = self.pendingDragEvent {
+                        self.cancelPendingDrag()
+                        self.performDrag(with: original)
+                        self.snapBackIfNeeded()
+                        return nil
+                    }
+                    if nextEvent.type == .leftMouseUp {
+                        self.cancelPendingDrag()
+                    }
+                    return nextEvent
+                }
+            }
+        }
+
+        super.sendEvent(event)
+    }
+
+    override func orderOut(_ sender: Any?) {
+        cancelPendingDrag()
+        super.orderOut(sender)
+    }
+
     override func cancelOperation(_ sender: Any?) {
         onEscape?()
+    }
+
+    func setRestingOrigin(
+        _ origin: NSPoint,
+        snapBackEnabled: Bool,
+        snapBackThreshold: CGFloat = 84
+    ) {
+        restingOrigin = origin
+        shouldSnapBackToRestingOrigin = snapBackEnabled
+        self.snapBackThreshold = snapBackThreshold
+    }
+
+    private func cancelPendingDrag() {
+        if let dragStartMonitor {
+            NSEvent.removeMonitor(dragStartMonitor)
+            self.dragStartMonitor = nil
+        }
+        pendingDragEvent = nil
+    }
+
+    private func snapBackIfNeeded() {
+        guard shouldSnapBackToRestingOrigin,
+              let restingOrigin else { return }
+
+        let dragDistance = hypot(frame.minX - restingOrigin.x, frame.minY - restingOrigin.y)
+        guard dragDistance <= snapBackThreshold else { return }
+
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.14
+            animator().setFrameOrigin(restingOrigin)
+        }
+    }
+
+    private func isScrollOrTextInput(_ view: NSView?) -> Bool {
+        var currentView = view
+        while let view = currentView {
+            if view is FocusedTextField.InputScrollView || view is NSTextView {
+                return true
+            }
+            if view.enclosingScrollView is FocusedTextField.InputScrollView {
+                return true
+            }
+            if view is NSScrollView {
+                return true
+            }
+            currentView = view.superview
+        }
+        return false
     }
 }
 
