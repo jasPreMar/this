@@ -36,6 +36,7 @@ class SearchViewModel: ObservableObject {
     var onSubmit: ((String, URL?) -> Void)?
     var onClose: (() -> Void)?
     var onMessageSent: (() -> Void)?
+    var onStreamingComplete: (() -> Void)?
 
     var isVoiceModeActive: Bool {
         switch voiceState {
@@ -65,6 +66,7 @@ class SearchViewModel: ObservableObject {
                 if let sid = manager.sessionId {
                     self?.currentSessionId = sid
                 }
+                self?.onStreamingComplete?()
             }
             claudeManager = manager
             manager.start(message: message, resumeSessionId: currentSessionId)

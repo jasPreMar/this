@@ -626,7 +626,7 @@ private struct FinishStep: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text("Chime sound")
                     .font(.system(size: 15, weight: .semibold))
-                Text("Play a chime when you press and release the invoke key.")
+                Text("Play a chime when you send a message and when a response arrives.")
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
             }

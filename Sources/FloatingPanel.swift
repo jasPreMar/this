@@ -166,6 +166,7 @@ class FloatingPanel: NSPanel {
     var onCommandKeyDropped: (() -> Void)?
     var onFeedbackShake: (() -> Void)?
     var onMessageSent: (() -> Void)?
+    var onStreamingComplete: (() -> Void)?
 
     init() {
         super.init(
@@ -194,6 +195,9 @@ class FloatingPanel: NSPanel {
         }
         searchViewModel.onMessageSent = { [weak self] in
             self?.onMessageSent?()
+        }
+        searchViewModel.onStreamingComplete = { [weak self] in
+            self?.onStreamingComplete?()
         }
         searchViewModel.onClose = { [weak self] in
             self?.close()
@@ -373,6 +377,7 @@ class FloatingPanel: NSPanel {
             if let sid = manager.sessionId {
                 self?.searchViewModel.currentSessionId = sid
             }
+            self?.onStreamingComplete?()
         }
         searchViewModel.claudeManager = manager
         searchViewModel.isChatMode = true
