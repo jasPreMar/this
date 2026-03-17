@@ -165,16 +165,6 @@ private struct PermissionsStep: View {
             VStack(alignment: .leading, spacing: 14) {
                 VStack(alignment: .leading, spacing: 0) {
                 PermissionStatusRow(
-                    title: "Automation (AppleScript)",
-                    description: "Approve per-app later when HyperPointer asks to control another app.",
-                    icon: "bolt.horizontal.circle",
-                    state: .informational("Later")
-                )
-
-                Divider()
-                    .padding(.leading, 64)
-
-                PermissionStatusRow(
                     title: "Accessibility",
                     description: "Control UI elements and inspect what is under your pointer.",
                     icon: "hand.raised",
@@ -236,6 +226,18 @@ private struct PermissionsStep: View {
                         if !viewModel.isSpeechRecognitionGranted {
                             viewModel.requestSpeechRecognition()
                         }
+                    }
+                )
+
+                Divider()
+                    .padding(.leading, 64)
+
+                PermissionStatusRow(
+                    title: "Automation",
+                    description: "Allow HyperPointer to control other apps via AppleScript.",
+                    icon: "bolt.horizontal.circle",
+                    state: .action("Grant") {
+                        viewModel.openAutomationSettings()
                     }
                 )
                 }
