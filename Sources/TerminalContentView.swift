@@ -240,6 +240,7 @@ class ClaudeProcessManager: ObservableObject {
     }
 
     private func handleData(_ data: Data) {
+        guard !isStopped else { return }
         buffer.append(data)
 
         // Split buffer on newlines, process complete lines
@@ -351,17 +352,22 @@ class ClaudeProcessManager: ObservableObject {
     }
     func stop() {
         isStopped = true
-        if let proc = process {
+        if let proc = process, proc.isRunning {
             let pid = proc.processIdentifier
-            // Kill child processes (claude may be a child of the zsh wrapper)
-            let pkillTask = Process()
-            pkillTask.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
-            pkillTask.arguments = ["-KILL", "-P", "\(pid)"]
-            pkillTask.standardOutput = FileHandle.nullDevice
-            pkillTask.standardError = FileHandle.nullDevice
-            try? pkillTask.run()
-            // SIGKILL the main process — cannot be caught or ignored
-            kill(pid, SIGKILL)
+            // Kill child processes first and wait for completion before
+            // killing the parent shell. Without waiting, the shell dies
+            // before pkill runs, orphaning the claude process which keeps
+            // the stdout pipe open and continues streaming.
+            DispatchQueue.global(qos: .userInitiated).async {
+                let pkillTask = Process()
+                pkillTask.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
+                pkillTask.arguments = ["-KILL", "-P", "\(pid)"]
+                pkillTask.standardOutput = FileHandle.nullDevice
+                pkillTask.standardError = FileHandle.nullDevice
+                try? pkillTask.run()
+                pkillTask.waitUntilExit()
+                kill(pid, SIGKILL)
+            }
         }
         DispatchQueue.main.async { self.status = .done }
     }
