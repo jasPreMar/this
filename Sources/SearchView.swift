@@ -249,10 +249,26 @@ struct FocusedTextField: NSViewRepresentable {
     static let maxWidth: CGFloat = 292
     static let maxHeight: CGFloat = 120
 
+    final class InputTextView: NSTextView {
+        var onWindowAttached: (() -> Void)?
+
+        override var acceptsFirstResponder: Bool { true }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            onWindowAttached?()
+        }
+    }
+
+    final class InputScrollView: NSScrollView {}
+
     func makeNSView(context: Context) -> NSScrollView {
-        let textView = NSTextView()
+        let textView = InputTextView()
         textView.autoresizingMask = [.width]
         textView.isRichText = false
+        textView.isEditable = true
+        textView.isSelectable = true
+        textView.allowsUndo = true
         textView.font = .monospacedSystemFont(ofSize: 13, weight: .regular)
         textView.backgroundColor = .clear
         textView.drawsBackground = false
@@ -265,7 +281,7 @@ struct FocusedTextField: NSViewRepresentable {
         textView.textContainer?.widthTracksTextView = true
         textView.delegate = context.coordinator
 
-        let scrollView = NSScrollView()
+        let scrollView = InputScrollView()
         scrollView.hasVerticalScroller = false
         scrollView.hasHorizontalScroller = false
         scrollView.drawsBackground = false
@@ -273,6 +289,10 @@ struct FocusedTextField: NSViewRepresentable {
         scrollView.autohidesScrollers = true
 
         context.coordinator.textView = textView
+        textView.onWindowAttached = { [weak coordinator = context.coordinator] in
+            coordinator?.attachWindowObserverIfNeeded()
+            coordinator?.focusTextView()
+        }
 
         return scrollView
     }
@@ -283,12 +303,8 @@ struct FocusedTextField: NSViewRepresentable {
             textView.string = text
             context.coordinator.updateHeight()
         }
-        // Auto-focus
-        DispatchQueue.main.async {
-            if let window = textView.window, window.firstResponder != textView {
-                window.makeFirstResponder(textView)
-            }
-        }
+        context.coordinator.attachWindowObserverIfNeeded()
+        context.coordinator.focusTextView()
     }
 
     func makeCoordinator() -> Coordinator {
@@ -306,6 +322,8 @@ struct FocusedTextField: NSViewRepresentable {
         @Binding var textHeight: CGFloat
         let onSubmit: () -> Void
         weak var textView: NSTextView?
+        private weak var observedWindow: NSWindow?
+        private var windowObserver: NSObjectProtocol?
 
         init(
             text: Binding<String>,
@@ -319,6 +337,10 @@ struct FocusedTextField: NSViewRepresentable {
             self.onSubmit = onSubmit
         }
 
+        deinit {
+            detachWindowObserver()
+        }
+
         func textDidChange(_ notification: Notification) {
             guard let textView = notification.object as? NSTextView else { return }
             text = textView.string
@@ -328,9 +350,48 @@ struct FocusedTextField: NSViewRepresentable {
         func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
             if commandSelector == #selector(NSResponder.insertNewline(_:)) {
                 onSubmit()
+                focusTextView()
                 return true
             }
             return false
+        }
+
+        func attachWindowObserverIfNeeded() {
+            guard let window = textView?.window else {
+                detachWindowObserver()
+                return
+            }
+            guard observedWindow !== window else { return }
+
+            detachWindowObserver()
+            observedWindow = window
+            windowObserver = NotificationCenter.default.addObserver(
+                forName: NSWindow.didBecomeKeyNotification,
+                object: window,
+                queue: .main
+            ) { [weak self] _ in
+                self?.focusTextView()
+            }
+        }
+
+        func focusTextView() {
+            DispatchQueue.main.async { [weak self] in
+                guard let self,
+                      let textView = self.textView,
+                      let window = textView.window,
+                      window.isVisible else { return }
+                if window.firstResponder !== textView {
+                    window.makeFirstResponder(textView)
+                }
+            }
+        }
+
+        private func detachWindowObserver() {
+            if let windowObserver {
+                NotificationCenter.default.removeObserver(windowObserver)
+            }
+            windowObserver = nil
+            observedWindow = nil
         }
 
         func updateHeight() {

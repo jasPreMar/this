@@ -249,7 +249,13 @@ class FloatingPanel: NSPanel {
     private func isScrollOrTextInput(_ view: NSView?) -> Bool {
         var v = view
         while let current = v {
-            if current is NSScrollView || current is NSTextView { return true }
+            if current is FocusedTextField.InputScrollView || current is NSTextView {
+                return true
+            }
+            if current.enclosingScrollView is FocusedTextField.InputScrollView {
+                return true
+            }
+            if current is NSScrollView { return true }
             v = current.superview
         }
         return false
