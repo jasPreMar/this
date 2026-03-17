@@ -121,35 +121,11 @@ sudo make grant
 
 This writes the grants directly to the TCC database so no popups ever appear.
 
-The `.app` and `.dmg` targets default to ad-hoc signing so they work cleanly on the local machine. That is enough for local testing, but it still triggers Gatekeeper's "macOS can't verify this app is free from malware" block on other Macs.
-
-To get the normal "This app was downloaded from the Internet" prompt instead, ship a Developer ID signed and notarized build:
+The `.app` and `.dmg` targets default to ad-hoc signing so they work cleanly on the local machine. If you want a distributable artifact for other Macs, pass a real Developer ID identity and notarize the result:
 
 ```bash
-./scripts/build-app.sh \
-  --sign-mode developer-id \
-  --sign-identity "Developer ID Application: Your Name (TEAMID)"
-
-./scripts/notarize.sh \
-  --path dist/HyperPointer.app \
-  --apple-id "you@example.com" \
-  --team-id "TEAMID" \
-  --password "app-specific-password"
-
-./scripts/build-dmg.sh \
-  --skip-build \
-  --app-path dist/HyperPointer.app \
-  --sign-mode developer-id \
-  --sign-identity "Developer ID Application: Your Name (TEAMID)"
-
-./scripts/notarize.sh \
-  --path dist/HyperPointer.dmg \
-  --apple-id "you@example.com" \
-  --team-id "TEAMID" \
-  --password "app-specific-password"
+SIGN_MODE=identity SIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)" make dmg
 ```
-
-The release workflow now follows that sequence automatically when the required GitHub secrets are configured.
 
 ## Sparkle Release Signing
 
@@ -169,15 +145,6 @@ That command prints the public key to embed in `SUPublicEDKey` inside `Sources/I
 ```
 
 Copy the contents of `sparkle-private-key.txt` into the `SPARKLE_PRIVATE_KEY` GitHub secret, then delete the file. The release workflow reads that secret with `sign_update --ed-key-file -`, signs `dist/HyperPointer.dmg`, and writes the resulting signature into `appcast.xml`.
-
-For public macOS releases you also need these GitHub secrets:
-
-- `DEVELOPER_ID_APPLICATION_P12`
-- `DEVELOPER_ID_APPLICATION_PASSWORD`
-- `DEVELOPER_ID_APPLICATION_NAME`
-- `APPLE_ID`
-- `APPLE_TEAM_ID`
-- `APPLE_APP_SPECIFIC_PASSWORD`
 
 ## Usage
 

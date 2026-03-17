@@ -10,7 +10,6 @@ INSTALL_AFTER_BUILD=0
 RUN_AFTER_BUILD=0
 SIGN_IDENTITY="${SIGN_IDENTITY:-}"
 SIGN_MODE="ad-hoc"
-ENTITLEMENTS_PATH="${ENTITLEMENTS_PATH:-$ROOT_DIR/config/macos/distribution.entitlements}"
 
 usage() {
   cat <<EOF
@@ -22,9 +21,8 @@ Options:
   --install                        Copy the built app into /Applications
   --run                            Open the built app after packaging
   --sign-identity <identity>       macOS signing identity to use
-  --sign-mode <ad-hoc|identity|developer-id|skip>
+  --sign-mode <ad-hoc|identity|skip>
                                    Signing mode (default: ad-hoc)
-  --entitlements <path>            Entitlements plist for Developer ID signing
 EOF
 }
 
@@ -55,10 +53,6 @@ while [[ $# -gt 0 ]]; do
       SIGN_MODE="${2:?missing value for --sign-mode}"
       shift 2
       ;;
-    --entitlements)
-      ENTITLEMENTS_PATH="${2:?missing value for --entitlements}"
-      shift 2
-      ;;
     --help|-h)
       usage
       exit 0
@@ -72,7 +66,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 case "$SIGN_MODE" in
-  ad-hoc|identity|developer-id|skip)
+  ad-hoc|identity|skip)
     ;;
   *)
     echo "Unsupported sign mode: $SIGN_MODE" >&2
@@ -83,18 +77,6 @@ esac
 if [[ "$SIGN_MODE" == "identity" && -z "$SIGN_IDENTITY" ]]; then
   echo "--sign-mode identity requires --sign-identity." >&2
   exit 1
-fi
-
-if [[ "$SIGN_MODE" == "developer-id" && -z "$SIGN_IDENTITY" ]]; then
-  echo "--sign-mode developer-id requires --sign-identity." >&2
-  exit 1
-fi
-
-if [[ "$SIGN_MODE" == "developer-id" ]]; then
-  if [[ ! -f "$ENTITLEMENTS_PATH" ]]; then
-    echo "Developer ID signing requires an entitlements plist at: $ENTITLEMENTS_PATH" >&2
-    exit 1
-  fi
 fi
 
 cd "$ROOT_DIR"
@@ -126,39 +108,25 @@ if [[ "$SIGN_MODE" != "skip" ]]; then
 
   if [[ "$SIGN_MODE" == "identity" ]]; then
     SIGN_ARG="$SIGN_IDENTITY"
-    TIMESTAMP_ARGS=(--timestamp=none)
-    SIGN_COMMON_ARGS=()
-    ENTITLEMENT_ARGS=()
-  elif [[ "$SIGN_MODE" == "developer-id" ]]; then
-    SIGN_ARG="$SIGN_IDENTITY"
-    TIMESTAMP_ARGS=(--timestamp)
-    SIGN_COMMON_ARGS=(--options runtime)
-    ENTITLEMENT_ARGS=(--entitlements "$ENTITLEMENTS_PATH")
   else
     SIGN_ARG="-"
-    TIMESTAMP_ARGS=(--timestamp=none)
-    SIGN_COMMON_ARGS=()
-    ENTITLEMENT_ARGS=()
   fi
 
   # Sign nested components before the app bundle
   if [[ -d "$CONTENTS_PATH/Frameworks/Sparkle.framework" ]]; then
     # Sign XPC services inside Sparkle
     find "$CONTENTS_PATH/Frameworks/Sparkle.framework" -name "*.xpc" -type d | while read xpc; do
-      codesign --force --sign "$SIGN_ARG" "${TIMESTAMP_ARGS[@]}" "${SIGN_COMMON_ARGS[@]}" "$xpc"
+      codesign --force --sign "$SIGN_ARG" --timestamp=none "$xpc"
     done
-    codesign --force --sign "$SIGN_ARG" "${TIMESTAMP_ARGS[@]}" "${SIGN_COMMON_ARGS[@]}" "$CONTENTS_PATH/Frameworks/Sparkle.framework"
+    codesign --force --sign "$SIGN_ARG" --timestamp=none "$CONTENTS_PATH/Frameworks/Sparkle.framework"
   fi
 
   codesign \
     --force \
+    --deep \
     --sign "$SIGN_ARG" \
-    "${TIMESTAMP_ARGS[@]}" \
-    "${SIGN_COMMON_ARGS[@]}" \
-    "${ENTITLEMENT_ARGS[@]}" \
+    --timestamp=none \
     "$APP_PATH"
-
-  codesign --verify --deep --strict --verbose=2 "$APP_PATH"
 fi
 
 echo "Built app bundle: $APP_PATH"

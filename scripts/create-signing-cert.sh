@@ -1,6 +1,6 @@
 #!/bin/zsh
 # One-time setup: create a self-signed code-signing certificate and export it
-# so CI or local builds can keep a stable signature for TCC permissions.
+# so CI can import it for stable signing.
 #
 # Usage: ./scripts/create-signing-cert.sh [cert-name]
 #   cert-name defaults to "HyperPointer"
@@ -16,11 +16,6 @@
 #   re-prompts for all permissions. A stable self-signed cert produces a
 #   requirement tied to the cert anchor hash — stable across all builds
 #   signed with the same cert.
-#
-# Important:
-#   This is not a replacement for Developer ID signing and notarization.
-#   A self-signed cert will not remove Gatekeeper's malware warning on
-#   downloaded apps.
 set -euo pipefail
 
 CERT_NAME="${1:-HyperPointer}"
