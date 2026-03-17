@@ -30,18 +30,21 @@ final class VoiceDictationController {
     private var latestTranscript = ""
     private var finishWorkItem: DispatchWorkItem?
     private var hasDeliveredResult = false
+    private var startGeneration: UInt = 0
 
     func start() {
         guard case .idle = state else { return }
 
+        let generation = startGeneration
         requestPermissions { [weak self] granted in
-            guard let self else { return }
+            guard let self, self.startGeneration == generation else { return }
             guard granted else {
                 self.fail("Microphone and speech access are required.")
                 return
             }
 
-            DispatchQueue.main.async {
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.startGeneration == generation else { return }
                 self.beginRecognitionSession()
             }
         }
@@ -68,6 +71,7 @@ final class VoiceDictationController {
     }
 
     func cancel() {
+        startGeneration &+= 1
         finishWorkItem?.cancel()
         recognitionTask?.cancel()
         teardownRecognitionSession()

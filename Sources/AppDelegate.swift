@@ -308,6 +308,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func makePanel() -> FloatingPanel {
         let panel = FloatingPanel()
+        panel.onCommandKeyDropped = { [weak self] in
+            self?.commandKeyHeld = false
+            self?.commandKeyPanel = nil
+        }
         panel.onFeedbackShake = { [weak self] in
             self?.openFeedbackPage()
         }

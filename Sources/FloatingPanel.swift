@@ -166,6 +166,7 @@ class FloatingPanel: NSPanel {
     private let voiceController = VoiceDictationController()
     private var mouseShakeDetector = MouseShakeDetector()
     var isCommandKeyHeld = false
+    var onCommandKeyDropped: (() -> Void)?
     var onFeedbackShake: (() -> Void)?
 
     init() {
@@ -477,9 +478,15 @@ class FloatingPanel: NSPanel {
         mouseShakeDetector.reset()
 
         if searchViewModel.isVoiceModeActive {
-            searchViewModel.isCommandKeyMode = false
-            searchViewModel.isMinimalMode = false
-            return
+            if isShiftHeld {
+                // User is still recording — keep panel open
+                searchViewModel.isCommandKeyMode = false
+                searchViewModel.isMinimalMode = false
+                return
+            } else {
+                // Stale voice state from a quick shift tap — cancel and proceed
+                voiceController.cancel()
+            }
         }
 
         guard isCommandKeyVisible else {
@@ -495,13 +502,14 @@ class FloatingPanel: NSPanel {
             NSApp.activate(ignoringOtherApps: true)
         }
 
-        // Dismiss when cursor moves (unless ⌘ is held again or a message was sent)
+        // Dismiss when cursor moves (unless ⌘ is held again or a message was sent).
+        // Check actual modifier state rather than tracked flag to handle missed releases.
         globalMouseMonitor = NSEvent.addGlobalMonitorForEvents(matching: .mouseMoved) { [weak self] _ in
-            guard let self, !self.isCommandKeyHeld, !self.searchViewModel.isChatMode else { return }
+            guard let self, !NSEvent.modifierFlags.contains(.command), !self.searchViewModel.isChatMode else { return }
             self.dismiss()
         }
         localMouseMonitor = NSEvent.addLocalMonitorForEvents(matching: .mouseMoved) { [weak self] event in
-            guard let self, !self.isCommandKeyHeld, !self.searchViewModel.isChatMode else { return event }
+            guard let self, !NSEvent.modifierFlags.contains(.command), !self.searchViewModel.isChatMode else { return event }
             self.dismiss()
             return event
         }
@@ -535,6 +543,14 @@ class FloatingPanel: NSPanel {
     }
 
     private func handleCommandKeyMouseMove() {
+        // Detect missed ⌘ release (e.g., consumed by App Switcher or Spotlight).
+        if !NSEvent.modifierFlags.contains(.command) {
+            isCommandKeyHeld = false
+            onCommandKeyDropped?()
+            endCommandKeyMode()
+            return
+        }
+
         let mouseLocation = NSEvent.mouseLocation
         if mouseShakeDetector.register(point: mouseLocation) {
             dismiss(restorePreviousFocus: false)
@@ -654,14 +670,18 @@ class FloatingPanel: NSPanel {
               isCursorFollowing,
               !searchViewModel.isVoiceModeActive else { return }
 
-        searchViewModel.isCommandKeyMode = false
-        searchViewModel.isMinimalMode = false
         voiceController.start()
     }
 
     private func stopVoiceModeIfNeeded() {
-        if searchViewModel.voiceState == .listening {
+        switch searchViewModel.voiceState {
+        case .listening:
             voiceController.stop()
+        case .idle:
+            // Voice start may still be pending (async permission/setup) — cancel it
+            voiceController.cancel()
+        case .transcribing, .failed:
+            break
         }
     }
 
