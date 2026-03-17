@@ -17,6 +17,12 @@ struct AutomationApp: Identifiable {
 
 final class OnboardingViewModel: ObservableObject {
     @Published var currentStep = 0
+    @Published var invokeHotKey = InvokeHotKey.stored() {
+        didSet {
+            guard oldValue != invokeHotKey else { return }
+            invokeHotKey.persist()
+        }
+    }
     @Published var isClaudeInstalled = false
     @Published var isAccessibilityGranted = false
     @Published var isScreenRecordingGranted = false
@@ -57,6 +63,7 @@ final class OnboardingViewModel: ObservableObject {
     }
 
     func refresh() {
+        invokeHotKey = InvokeHotKey.stored()
         isClaudeInstalled = resolveClaudeBinaryPath() != nil
         isAccessibilityGranted = AXIsProcessTrusted()
         isScreenRecordingGranted = CGPreflightScreenCaptureAccess()

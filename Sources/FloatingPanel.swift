@@ -443,7 +443,7 @@ class FloatingPanel: NSPanel {
 
     // MARK: - Command key mode
 
-    /// Called when Fn is pressed. Shows a minimal icon indicator immediately,
+    /// Called when the invoke hotkey is pressed. Shows a minimal icon indicator immediately,
     /// then expands to the full panel on the first cursor move.
     func startCommandKeyMode() {
         isCommandKeyHeld = true
@@ -470,7 +470,7 @@ class FloatingPanel: NSPanel {
         }
     }
 
-    /// Called when Fn is released. Anchors the panel and shows the input row.
+    /// Called when the invoke hotkey is released. Anchors the panel and shows the input row.
     /// If the panel was never shown (cursor didn't move), discard silently.
     func endCommandKeyMode() {
         if let m = commandKeyMouseMonitor { NSEvent.removeMonitor(m); commandKeyMouseMonitor = nil }
@@ -495,14 +495,18 @@ class FloatingPanel: NSPanel {
             NSApp.activate(ignoringOtherApps: true)
         }
 
-        // Dismiss when cursor moves (unless Fn is held again or a message was sent).
+        // Dismiss when cursor moves (unless the invoke hotkey is held again or a message was sent).
         // Check actual modifier state rather than tracked flag to handle missed releases.
         globalMouseMonitor = NSEvent.addGlobalMonitorForEvents(matching: .mouseMoved) { [weak self] _ in
-            guard let self, !NSEvent.modifierFlags.contains(.function), !self.searchViewModel.isChatMode else { return }
+            guard let self,
+                  !InvokeHotKey.stored().isPressed(in: NSEvent.modifierFlags),
+                  !self.searchViewModel.isChatMode else { return }
             self.dismiss()
         }
         localMouseMonitor = NSEvent.addLocalMonitorForEvents(matching: .mouseMoved) { [weak self] event in
-            guard let self, !NSEvent.modifierFlags.contains(.function), !self.searchViewModel.isChatMode else { return event }
+            guard let self,
+                  !InvokeHotKey.stored().isPressed(in: NSEvent.modifierFlags),
+                  !self.searchViewModel.isChatMode else { return event }
             self.dismiss()
             return event
         }
@@ -537,8 +541,8 @@ class FloatingPanel: NSPanel {
     }
 
     private func handleCommandKeyMouseMove() {
-        // Detect missed Fn release (e.g., consumed by system).
-        if !NSEvent.modifierFlags.contains(.function) {
+        // Detect missed invoke hotkey releases (e.g., consumed by system).
+        if !InvokeHotKey.stored().isPressed(in: NSEvent.modifierFlags) {
             isCommandKeyHeld = false
             onCommandKeyDropped?()
             endCommandKeyMode()

@@ -31,7 +31,7 @@
 	<key>NSDownloadsFolderUsageDescription</key>
 	<string>HyperPointer may access your Downloads folder to help with file management tasks.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>HyperPointer uses your microphone for command-held voice input.</string>
+	<string>HyperPointer uses your microphone for invoke-key voice input.</string>
 	<key>NSRemindersUsageDescription</key>
 	<string>HyperPointer can read and create reminders when you ask it to manage your tasks.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>

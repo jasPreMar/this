@@ -154,7 +154,7 @@ private struct WelcomeStep: View {
 
                 setupBlock(
                     title: "What is required now",
-                    body: "Claude CLI, Accessibility, and Screen Recording are the core pieces. Microphone and Speech Recognition are only needed for command-held voice input."
+                    body: "Claude CLI, Accessibility, and Screen Recording are the core pieces. Microphone and Speech Recognition are only needed for invoke-key voice input."
                 )
 
                 HStack(spacing: 12) {
@@ -264,7 +264,7 @@ private struct PermissionsStep: View {
 
                 PermissionRow(
                     title: "Microphone",
-                    description: "Optional. Required only for command-held voice input.",
+                    description: "Optional. Required only if you want voice input while holding your invoke key.",
                     statusText: viewModel.statusLabel(for: viewModel.microphoneStatus),
                     isReady: viewModel.microphoneStatus == .authorized,
                     primaryTitle: viewModel.microphoneStatus == .authorized ? "Open Settings" : "Grant Access",
@@ -281,7 +281,7 @@ private struct PermissionsStep: View {
 
                 PermissionRow(
                     title: "Speech Recognition",
-                    description: "Optional. Used together with the microphone for voice input.",
+                    description: "Optional. Used together with the microphone for invoke-key voice input.",
                     statusText: viewModel.statusLabel(for: viewModel.speechStatus),
                     isReady: viewModel.speechStatus == .authorized,
                     primaryTitle: viewModel.speechStatus == .authorized ? "Open Settings" : "Grant Access",
@@ -439,20 +439,20 @@ private class TutorialState: ObservableObject {
     }
 
     private func handleFlags(_ event: NSEvent) {
-        let commandDown = event.modifierFlags.contains(.command)
+        let invokeKeyDown = InvokeHotKey.stored().isPressed(in: event.modifierFlags)
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             switch self.phase {
             case .holdCommand:
-                if commandDown { self.phase = .exploring }
+                if invokeKeyDown { self.phase = .exploring }
             case .exploring, .hovering:
-                if !commandDown {
+                if !invokeKeyDown {
                     self.dwellTimer?.invalidate()
                     self.phase = .holdCommand
                     self.hoveredItem = nil
                 }
             case .dwelled:
-                if !commandDown {
+                if !invokeKeyDown {
                     self.selectedItem = self.hoveredItem
                     self.phase = .released
                 }
@@ -490,20 +490,49 @@ private struct FinishStep: View {
     @StateObject private var tutorial = TutorialState()
 
     var body: some View {
-        ZStack {
-            if tutorial.phase == .holdCommand {
-                holdCommandView
-                    .transition(.opacity)
-            } else {
-                desktopView
-                    .transition(.opacity)
+        VStack(spacing: 0) {
+            invokeKeyCard
+
+            ZStack {
+                if tutorial.phase == .holdCommand {
+                    holdCommandView
+                        .transition(.opacity)
+                } else {
+                    desktopView
+                        .transition(.opacity)
+                }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .animation(.easeOut(duration: 0.3), value: tutorial.phase)
         .animation(.easeOut(duration: 0.15), value: tutorial.hoveredItem?.id)
         .onAppear { tutorial.start() }
         .onDisappear { tutorial.stop() }
+    }
+
+    private var invokeKeyCard: some View {
+        HStack(alignment: .center, spacing: 16) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Invoke hotkey")
+                    .font(.system(size: 15, weight: .semibold))
+                Text("Choose which modifier key you hold to bring up HyperPointer. Fn is the safest default if you want to avoid clashes with app shortcuts.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer()
+
+            Picker("Invoke hotkey", selection: $viewModel.invokeHotKey) {
+                ForEach(InvokeHotKey.allCases) { hotKey in
+                    Text(hotKey.displayName).tag(hotKey)
+                }
+            }
+            .pickerStyle(.menu)
+            .frame(width: 160)
+        }
+        .padding(.horizontal, 28)
+        .padding(.top, 24)
+        .padding(.bottom, 12)
     }
 
     // MARK: - Hold Command Phase
@@ -511,10 +540,10 @@ private struct FinishStep: View {
     private var holdCommandView: some View {
         VStack(spacing: 16) {
             Spacer()
-            Text("\u{2318}")
+            Text(viewModel.invokeHotKey.symbol)
                 .font(.system(size: 56, weight: .medium, design: .rounded))
                 .foregroundStyle(.tertiary)
-            Text("Hold command")
+            Text(viewModel.invokeHotKey.holdLabel)
                 .font(.system(size: 24, weight: .semibold))
             Text("You should see a little icon appear next to your cursor.")
                 .font(.system(size: 14))
@@ -586,7 +615,7 @@ private struct FinishStep: View {
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)
                 case .dwelled:
-                    Text("Now release \u{2318}")
+                    Text(viewModel.invokeHotKey.releaseLabel)
                         .font(.system(size: 14, weight: .medium))
                     Text("The panel will anchor and an input field will appear.")
                         .font(.system(size: 12))
