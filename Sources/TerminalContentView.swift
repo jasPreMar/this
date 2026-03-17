@@ -54,7 +54,8 @@ class ClaudeProcessManager: ObservableObject {
     func start(
         message: String,
         screenshotURL: URL? = nil,
-        resumeSessionId: String? = nil
+        resumeSessionId: String? = nil,
+        workingDirectoryURL: URL? = nil
     ) {
         // Reset stale events from previous messages
         DispatchQueue.main.async {
@@ -97,6 +98,7 @@ class ClaudeProcessManager: ObservableObject {
         self.process = process
 
         process.executableURL = URL(fileURLWithPath: "/bin/zsh")
+        process.currentDirectoryURL = workingDirectoryURL
         let useStreamJsonInput = stdinData != nil
         let claudeCmd = makeClaudeCommand(
             claudePath: claudePath,
