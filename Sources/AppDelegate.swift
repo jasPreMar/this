@@ -89,7 +89,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             return event
         }
 
-        // Hold ⌘ to activate panel; release before sending = dismiss, release after = keep
+        // Hold ⌘ to activate the panel and voice capture; release to anchor the panel for editing.
         flagsMonitor = NSEvent.addGlobalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
             self?.handleFlagsChanged(event)
         }

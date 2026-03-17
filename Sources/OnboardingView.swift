@@ -154,7 +154,7 @@ private struct WelcomeStep: View {
 
                 setupBlock(
                     title: "What is required now",
-                    body: "Claude CLI, Accessibility, and Screen Recording are the core pieces. Microphone and Speech Recognition are only needed for Shift-to-dictate."
+                    body: "Claude CLI, Accessibility, and Screen Recording are the core pieces. Microphone and Speech Recognition are only needed for command-held voice input."
                 )
 
                 HStack(spacing: 12) {
@@ -264,7 +264,7 @@ private struct PermissionsStep: View {
 
                 PermissionRow(
                     title: "Microphone",
-                    description: "Optional. Required only for Shift-to-dictate.",
+                    description: "Optional. Required only for command-held voice input.",
                     statusText: viewModel.statusLabel(for: viewModel.microphoneStatus),
                     isReady: viewModel.microphoneStatus == .authorized,
                     primaryTitle: viewModel.microphoneStatus == .authorized ? "Open Settings" : "Grant Access",

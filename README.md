@@ -108,7 +108,7 @@ On first launch, HyperPointer opens an onboarding wizard that walks through:
 - Installing or verifying Claude CLI
 - Accessibility
 - Screen Recording
-- Optional microphone and speech permissions for dictation
+- Optional microphone and speech permissions for command-held dictation
 - Optional Automation approvals for the apps you want HyperPointer to control
 
 You can reopen the wizard any time from the menu bar item with `Open Onboarding`.

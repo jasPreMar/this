@@ -151,15 +151,12 @@ class FloatingPanel: NSPanel {
     private var localMouseMonitor: Any?
     private var globalClickMonitor: Any?
     private var commandKeyMouseMonitor: Any?
-    private var globalFlagsMonitor: Any?
-    private var localFlagsMonitor: Any?
     private var dragStartMonitor: Any?
     private var pendingDragEvent: NSEvent?
     private var hostingView: NSHostingView<PanelContentView>!
     private var isTerminalMode = false
     private var isCommandKeyVisible = false
     private var isCursorFollowing = false
-    private var isShiftHeld = false
     private var lastReportedContentSize: CGSize = .zero
     private var focusRestorationState: FocusRestorationState?
     private var shouldRestoreFocusOnClose = true
@@ -209,7 +206,6 @@ class FloatingPanel: NSPanel {
         voiceController.onTranscript = { [weak self] transcript in
             guard let self else { return }
             self.searchViewModel.query = transcript
-            self.searchViewModel.submitMessage()
         }
     }
 
@@ -261,7 +257,6 @@ class FloatingPanel: NSPanel {
     func show(at point: NSPoint) {
         searchViewModel.query = ""
         searchViewModel.updateHoveredApp()
-        installFlagsMonitors()
         isCursorFollowing = false
 
         let fittingSize = hostingView.fittingSize
@@ -293,7 +288,6 @@ class FloatingPanel: NSPanel {
 
     func show() {
         searchViewModel.query = ""
-        installFlagsMonitors()
         isCursorFollowing = true
 
         positionAtCursor()
@@ -445,7 +439,7 @@ class FloatingPanel: NSPanel {
     /// Called when ⌘ is pressed. Shows a minimal icon indicator immediately,
     /// then expands to the full panel on the first cursor move.
     func startCommandKeyMode() {
-        installFlagsMonitors()
+        isCommandKeyHeld = true
         searchViewModel.isCommandKeyMode = true
         searchViewModel.isMinimalMode = true
         searchViewModel.query = ""
@@ -457,6 +451,7 @@ class FloatingPanel: NSPanel {
         searchViewModel.updateHoveredApp()
         positionAtCursor()
         orderFront(nil)
+        startVoiceModeIfNeeded()
 
         commandKeyMouseMonitor = NSEvent.addGlobalMonitorForEvents(matching: .mouseMoved) { [weak self] _ in
             guard let self else { return }
@@ -477,22 +472,13 @@ class FloatingPanel: NSPanel {
         isCursorFollowing = false
         mouseShakeDetector.reset()
 
-        if searchViewModel.isVoiceModeActive {
-            if isShiftHeld {
-                // User is still recording — keep panel open
-                searchViewModel.isCommandKeyMode = false
-                searchViewModel.isMinimalMode = false
-                return
-            } else {
-                // Stale voice state from a quick shift tap — cancel and proceed
-                voiceController.cancel()
-            }
-        }
-
         guard isCommandKeyVisible else {
+            voiceController.cancel()
             dismiss(restorePreviousFocus: false)
             return
         }
+
+        stopVoiceModeIfNeeded()
 
         // Show input row if it was hidden
         if searchViewModel.isCommandKeyMode {
@@ -522,13 +508,14 @@ class FloatingPanel: NSPanel {
         if let m = localMouseMonitor { NSEvent.removeMonitor(m); localMouseMonitor = nil }
         if let m = commandKeyMouseMonitor { NSEvent.removeMonitor(m); commandKeyMouseMonitor = nil }
 
-        installFlagsMonitors()
+        isCommandKeyHeld = true
         isCommandKeyVisible = true
         isCursorFollowing = true
         mouseShakeDetector.reset()
         if searchViewModel.query.isEmpty {
             searchViewModel.isCommandKeyMode = true
         }
+        startVoiceModeIfNeeded()
 
         // Global monitor fires when another app is frontmost; local monitor fires when we are.
         commandKeyMouseMonitor = NSEvent.addGlobalMonitorForEvents(matching: .mouseMoved) { [weak self] _ in
@@ -568,8 +555,7 @@ class FloatingPanel: NSPanel {
             localMouseMonitor,
             globalClickMonitor,
             commandKeyMouseMonitor,
-            globalFlagsMonitor,
-            localFlagsMonitor
+            dragStartMonitor
         ].compactMap({ $0 }) {
             NSEvent.removeMonitor(monitor)
         }
@@ -577,8 +563,7 @@ class FloatingPanel: NSPanel {
         localMouseMonitor = nil
         globalClickMonitor = nil
         commandKeyMouseMonitor = nil
-        globalFlagsMonitor = nil
-        localFlagsMonitor = nil
+        dragStartMonitor = nil
         cancelPendingDrag()
         mouseShakeDetector.reset()
     }
@@ -614,7 +599,6 @@ class FloatingPanel: NSPanel {
         isCommandKeyVisible = false
         isCursorFollowing = false
         isCommandKeyHeld = false
-        isShiftHeld = false
 
         if shouldRestoreFocus {
             restoreFocus(using: restorationState)
@@ -636,38 +620,12 @@ class FloatingPanel: NSPanel {
         close()
     }
 
-    private func installFlagsMonitors() {
-        if globalFlagsMonitor == nil {
-            globalFlagsMonitor = NSEvent.addGlobalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
-                self?.handleFlagsChanged(event)
-            }
-        }
-        if localFlagsMonitor == nil {
-            localFlagsMonitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
-                self?.handleFlagsChanged(event)
-                return event
-            }
-        }
-    }
-
-    private func handleFlagsChanged(_ event: NSEvent) {
-        let shiftDown = event.modifierFlags.contains(.shift)
-
-        if shiftDown && !isShiftHeld {
-            isShiftHeld = true
-            startVoiceModeIfNeeded()
-        } else if !shiftDown && isShiftHeld {
-            isShiftHeld = false
-            stopVoiceModeIfNeeded()
-        }
-    }
-
     private func startVoiceModeIfNeeded() {
         guard isVisible,
               !isTerminalMode,
               !searchViewModel.isChatMode,
-              !searchViewModel.isMinimalMode,
-              isCursorFollowing,
+              isCommandKeyHeld,
+              searchViewModel.isCommandKeyMode,
               !searchViewModel.isVoiceModeActive else { return }
 
         voiceController.start()

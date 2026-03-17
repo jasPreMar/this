@@ -47,7 +47,7 @@ struct SearchView: View {
                         .padding(.horizontal, 8)
                 }
 
-                if !viewModel.isCommandKeyMode && !viewModel.isVoiceModeActive {
+                if !viewModel.isCommandKeyMode {
                     PanelInputRow(
                         viewModel: viewModel,
                         textWidth: $textWidth,
@@ -144,8 +144,6 @@ struct PanelHeaderSection<Accessory: View>: View {
                         text: visiblePart,
                         appIcon: viewModel.hoveredContextIcon,
                         contextText: viewModel.hoveredParts.first,
-                        voiceState: viewModel.voiceState,
-                        voiceLevel: viewModel.voiceLevel,
                         showsCloseButtonOnHover: showsCloseButtonOnHover,
                         onClose: onClose
                     )
@@ -164,7 +162,7 @@ struct PanelHeaderSection<Accessory: View>: View {
                     Group {
                         switch viewModel.voiceState {
                         case .listening:
-                            Text("Release Shift to send")
+                            Text("Release Command to edit")
                                 .font(.system(size: 13))
                                 .foregroundColor(.secondary)
                         case .transcribing:
@@ -183,7 +181,6 @@ struct PanelHeaderSection<Accessory: View>: View {
                     }
 
                     Spacer(minLength: 8)
-                    VoiceTrailingIndicator(state: viewModel.voiceState, level: viewModel.voiceLevel)
                     accessory
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -361,8 +358,6 @@ struct ContextSummaryView: View {
     let text: String
     let appIcon: NSImage?
     let contextText: String?
-    let voiceState: SearchViewModel.VoiceState
-    let voiceLevel: CGFloat
     let showsCloseButtonOnHover: Bool
     let onClose: (() -> Void)?
     @State private var isHovered = false
@@ -377,9 +372,6 @@ struct ContextSummaryView: View {
                 .lineLimit(1)
                 .truncationMode(.tail)
                 .foregroundColor(.primary)
-
-            Spacer(minLength: 8)
-            VoiceTrailingIndicator(state: voiceState, level: voiceLevel)
         }
         .frame(maxWidth: .infinity)
         .onHover { isHovered = $0 }
@@ -457,78 +449,6 @@ struct ContextSummaryView: View {
         if lower.contains("notification") { return "bell" }
 
         return "app"
-    }
-}
-
-struct VoiceTrailingIndicator: View {
-    let state: SearchViewModel.VoiceState
-    let level: CGFloat
-
-    var body: some View {
-        Group {
-            switch state {
-            case .idle:
-                HStack(spacing: 3) {
-                    Image(systemName: "shift")
-                        .font(.system(size: 11, weight: .medium))
-                    Image(systemName: "mic")
-                        .font(.system(size: 11, weight: .medium))
-                }
-                .foregroundColor(Color.secondary.opacity(0.45))
-            case .listening:
-                CompactVoiceWaveformView(level: level)
-            case .transcribing:
-                Image(systemName: "ellipsis")
-                    .font(.system(size: 9))
-                    .foregroundColor(.secondary)
-            case .failed:
-                EmptyView()
-            }
-        }
-    }
-}
-
-struct CompactVoiceWaveformView: View {
-    let level: CGFloat
-
-    var body: some View {
-        TimelineView(.animation(minimumInterval: 0.08)) { timeline in
-            let time = timeline.date.timeIntervalSinceReferenceDate
-
-            HStack(alignment: .center, spacing: 2) {
-                ForEach(0..<4, id: \.self) { index in
-                    let phase = abs(sin(time * 6 + Double(index) * 0.65))
-                    let amplitude = max(0.18, min(1, level * (0.75 + (phase * 0.75))))
-
-                    RoundedRectangle(cornerRadius: 1.5)
-                        .fill(Color.accentColor.opacity(0.95))
-                        .frame(width: 3, height: 5 + (amplitude * 14))
-                }
-            }
-            .frame(height: 20, alignment: .center)
-        }
-    }
-}
-
-struct VoiceWaveformView: View {
-    let level: CGFloat
-
-    var body: some View {
-        TimelineView(.animation(minimumInterval: 0.08)) { timeline in
-            let time = timeline.date.timeIntervalSinceReferenceDate
-
-            HStack(alignment: .center, spacing: 3) {
-                ForEach(0..<6, id: \.self) { index in
-                    let phase = abs(sin(time * 6 + Double(index) * 0.65))
-                    let amplitude = max(0.18, min(1, level * (0.75 + (phase * 0.75))))
-
-                    RoundedRectangle(cornerRadius: 1.5)
-                        .fill(Color.accentColor.opacity(0.95))
-                        .frame(width: 3, height: 5 + (amplitude * 14))
-                }
-            }
-            .frame(height: 20, alignment: .center)
-        }
     }
 }
 
