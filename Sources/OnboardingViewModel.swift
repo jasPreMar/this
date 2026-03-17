@@ -27,6 +27,7 @@ private enum PendingPermissionRequest: String {
 
 final class OnboardingViewModel: ObservableObject {
     private static let currentStepKey = "onboardingCurrentStep"
+    let soundPlayer = PTTSoundPlayer()
     private static let lastStepIndex = 3
     private static let resumeOnLaunchKey = "resumeOnboardingOnLaunch"
     private static let pendingPermissionRequestKey = "pendingPermissionRequest"
@@ -41,6 +42,11 @@ final class OnboardingViewModel: ObservableObject {
         didSet {
             guard oldValue != invokeHotKey else { return }
             invokeHotKey.persist()
+        }
+    }
+    @Published var chimeEnabled = UserDefaults.standard.bool(forKey: "chimeEnabled") {
+        didSet {
+            UserDefaults.standard.set(chimeEnabled, forKey: "chimeEnabled")
         }
     }
     @Published var isClaudeInstalled = false

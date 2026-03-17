@@ -23,12 +23,9 @@ class PTTSoundPlayer {
     }
 
     private static func loadSound(named name: String) -> NSSound? {
-        if let url = Bundle.main.url(forResource: name, withExtension: "wav") {
+        if let url = Bundle.module.url(forResource: name, withExtension: "wav") {
             return NSSound(contentsOf: url, byReference: false)
         }
-        let execDir = URL(fileURLWithPath: CommandLine.arguments[0]).deletingLastPathComponent()
-        let url = execDir.appendingPathComponent("\(name).wav")
-        guard FileManager.default.fileExists(atPath: url.path) else { return nil }
-        return NSSound(contentsOf: url, byReference: false)
+        return nil
     }
 }

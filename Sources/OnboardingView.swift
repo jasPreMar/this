@@ -570,6 +570,9 @@ private struct FinishStep: View {
                 invokeKeyCard
                     .cardStyle()
 
+                chimeToggleCard
+                    .cardStyle()
+
                 ZStack {
                     if tutorial.phase == .holdCommand {
                         holdCommandView
@@ -611,6 +614,30 @@ private struct FinishStep: View {
             .pickerStyle(.menu)
             .frame(width: 160)
             .onboardingClickableCursor()
+        }
+        .padding(.horizontal, 28)
+        .padding(.vertical, 18)
+    }
+
+    private var chimeToggleCard: some View {
+        HStack(alignment: .center, spacing: 16) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Chime sound")
+                    .font(.system(size: 15, weight: .semibold))
+                Text("Play a chime when you press and release the invoke key.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer()
+
+            Toggle("", isOn: $viewModel.chimeEnabled)
+                .toggleStyle(.switch)
+                .labelsHidden()
+                .onboardingClickableCursor()
+                .onChange(of: viewModel.chimeEnabled) { _, enabled in
+                    if enabled { viewModel.soundPlayer.playPress() }
+                }
         }
         .padding(.horizontal, 28)
         .padding(.vertical, 18)

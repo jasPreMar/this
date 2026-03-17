@@ -17,6 +17,10 @@ let package = Package(
             ],
             path: "Sources",
             exclude: ["Info.plist"],
+            resources: [
+                .process("Resources/A4.wav"),
+                .process("Resources/C5.wav"),
+            ],
             // Embed Info.plist so macOS shows proper privacy descriptions in TCC dialogs.
             // Run `swift build` from the package root so the relative path resolves correctly.
             linkerSettings: [

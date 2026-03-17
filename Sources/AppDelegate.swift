@@ -67,6 +67,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         sharedAppDelegate = self
+        UserDefaults.standard.register(defaults: ["chimeEnabled": true])
         setupMainMenu()
         updaterController = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: self, userDriverDelegate: nil)
         setupStatusItem()
@@ -104,7 +105,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let invokeKeyDown = InvokeHotKey.stored().isPressed(in: event.modifierFlags)
         if invokeKeyDown && !commandKeyHeld {
             commandKeyHeld = true
-            soundPlayer.playPress()
+            if UserDefaults.standard.bool(forKey: "chimeEnabled") {
+                soundPlayer.playPress()
+            }
 
             // Reuse an existing visible non-chat panel if one exists
             if let existing = panels.first(where: {
@@ -122,7 +125,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
         } else if !invokeKeyDown && commandKeyHeld {
             commandKeyHeld = false
-            soundPlayer.playRelease()
+            if UserDefaults.standard.bool(forKey: "chimeEnabled") {
+                soundPlayer.playRelease()
+            }
             if let panel = commandKeyPanel {
                 panel.isCommandKeyHeld = false
                 panel.endCommandKeyMode()
@@ -333,7 +338,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             self?.openFeedbackPage()
         }
         panel.onMessageSent = { [weak self] in
-            self?.soundPlayer.playRelease()
+            if UserDefaults.standard.bool(forKey: "chimeEnabled") {
+                self?.soundPlayer.playRelease()
+            }
         }
         return panel
     }
