@@ -423,6 +423,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         showSettings()
     }
 
+    func openFeedbackFromCommandMenu(draft: String? = nil) {
+        closeCommandMenu()
+        openFeedbackPage(draft: draft)
+    }
+
     private func showSettings() {
         if let settingsWindow {
             refreshApplicationPresentation()
@@ -794,6 +799,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         record.panel?.searchViewModel.claudeManager?.stop()
     }
 
+    func stopAllRunningTaskRecords() {
+        for record in taskRecords where record.isRunning {
+            stopTaskRecord(record)
+        }
+    }
+
     func deleteTaskRecord(_ record: TaskSessionRecord) {
         // Delete persisted session from disk
         if let persistedId = record.persistedSessionId {
@@ -950,10 +961,18 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         return nil
     }
 
-    func openFeedbackPage() {
+    func openFeedbackPage(draft: String? = nil) {
         guard let url = URL(string: "https://prickly-perfume-f62.notion.site/ebd/5ca57834b3ec456eba024dc6ac60a337") else {
             return
         }
+
+        let trimmedDraft = draft?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let trimmedDraft, !trimmedDraft.isEmpty {
+            let pasteboard = NSPasteboard.general
+            pasteboard.clearContents()
+            pasteboard.setString(trimmedDraft, forType: .string)
+        }
+
         guard let button = statusItem?.button else {
             NSWorkspace.shared.open(url)
             return
@@ -962,11 +981,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         // Keep the menu action and shake gesture on the same feedback UI path.
         if let existing = feedbackPopover, existing.isShown {
             existing.performClose(nil)
-            return
+            feedbackPopover = nil
+            if trimmedDraft == nil || trimmedDraft?.isEmpty == true {
+                return
+            }
         }
 
         let webView = WKWebView(frame: NSRect(x: 0, y: 0, width: 480, height: 580))
-        let focusDelegate = FeedbackWebViewDelegate()
+        let focusDelegate = FeedbackWebViewDelegate(draftText: trimmedDraft)
         webView.navigationDelegate = focusDelegate
         webView.load(URLRequest(url: url))
 
@@ -1100,14 +1122,72 @@ extension AppDelegate: NSWindowDelegate {
 
 private class FeedbackWebViewDelegate: NSObject, WKNavigationDelegate {
     static var associatedKey: UInt8 = 0
+    private let draftText: String?
+
+    init(draftText: String? = nil) {
+        self.draftText = draftText
+    }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         // Notion forms render dynamically; delay slightly to let React mount the fields.
-        webView.evaluateJavaScript("""
-            setTimeout(function() {
-                var el = document.querySelector('input[type="text"], input[type="email"], textarea, [contenteditable="true"]');
-                if (el) { el.focus(); }
-            }, 600);
-        """, completionHandler: nil)
+        let draftScriptArgument = draftText.flatMap(Self.jsonEncodedString) ?? "null"
+        webView.evaluateJavaScript(
+            """
+            (function(draftText) {
+                function focusAndPopulateField() {
+                    var selectors = [
+                        'textarea',
+                        'input:not([type="hidden"]):not([type="email"])',
+                        '[contenteditable="true"]',
+                        'input[type="email"]'
+                    ];
+                    var nodes = [];
+                    selectors.forEach(function(selector) {
+                        nodes = nodes.concat(Array.from(document.querySelectorAll(selector)));
+                    });
+
+                    var field = nodes.find(function(node) {
+                        if (!node) { return false; }
+                        if (node.getAttribute('aria-hidden') === 'true') { return false; }
+                        if (node.disabled) { return false; }
+                        return true;
+                    });
+
+                    if (!field) { return false; }
+
+                    field.focus();
+
+                    if (draftText && draftText.length > 0) {
+                        if (field.isContentEditable) {
+                            field.textContent = draftText;
+                        } else {
+                            field.value = draftText;
+                        }
+                        field.dispatchEvent(new Event('input', { bubbles: true }));
+                        field.dispatchEvent(new Event('change', { bubbles: true }));
+                    }
+
+                    return true;
+                }
+
+                var attempts = 0;
+                var timer = setInterval(function() {
+                    attempts += 1;
+                    if (focusAndPopulateField() || attempts >= 14) {
+                        clearInterval(timer);
+                    }
+                }, 300);
+            })(\(draftScriptArgument));
+            """,
+            completionHandler: nil
+        )
+    }
+
+    private static func jsonEncodedString(_ string: String) -> String? {
+        guard let data = try? JSONSerialization.data(withJSONObject: [string]),
+              let encoded = String(data: data, encoding: .utf8) else {
+            return nil
+        }
+        return encoded.dropFirst().dropLast().description
     }
 }

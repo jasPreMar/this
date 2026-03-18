@@ -110,6 +110,7 @@ struct CommandMenuView: View {
     @ObservedObject var appDelegate: AppDelegate
     @State private var query = ""
     @State private var selectedTaskID: TaskSessionRecord.ID?
+    @State private var selectedQueryActionID: CommandMenuQueryAction.Kind?
     @State private var textWidth: CGFloat = FocusedTextField.minWidth
     @State private var textHeight: CGFloat = 20
     @State private var inputRowHeight: CGFloat = Self.fallbackInputRowHeight
@@ -130,6 +131,32 @@ struct CommandMenuView: View {
         return sortedTasks.first(where: { $0.id == selectedTaskID })
     }
 
+    private var queryActions: [CommandMenuQueryAction] {
+        guard !queryIsEmpty else { return [] }
+
+        return [
+            CommandMenuQueryAction(
+                kind: .runTask,
+                title: "Start task",
+                subtitle: "Run \"\(trimmedQuery)\" from your Home folder",
+                symbolName: "play.fill",
+                shortcutKeys: ["↩"]
+            ),
+            CommandMenuQueryAction(
+                kind: .sendFeedback,
+                title: "Send as feedback",
+                subtitle: "Open feedback with this text prefilled",
+                symbolName: "bubble.left.and.text.bubble.right.fill",
+                shortcutKeys: ["⌘", "⇧", "↩"]
+            )
+        ]
+    }
+
+    private var selectedQueryAction: CommandMenuQueryAction? {
+        guard let selectedQueryActionID else { return nil }
+        return queryActions.first(where: { $0.kind == selectedQueryActionID })
+    }
+
     private var trimmedQuery: String {
         query.trimmingCharacters(in: .whitespacesAndNewlines)
     }
@@ -139,23 +166,31 @@ struct CommandMenuView: View {
     }
 
     private var footerShortcuts: [CommandMenuShortcutItem] {
-        guard queryIsEmpty else {
-            return [
-                CommandMenuShortcutItem(label: "Run", keys: ["↩"])
+        var shortcuts: [CommandMenuShortcutItem]
+
+        if queryIsEmpty {
+            shortcuts = []
+
+            if let selectedTask {
+                shortcuts.append(CommandMenuShortcutItem(label: "Open", keys: ["↩"]))
+
+                if selectedTask.isRunning {
+                    shortcuts.append(CommandMenuShortcutItem(label: "Stop", keys: ["⌫"]))
+                }
+
+                shortcuts.append(CommandMenuShortcutItem(label: "Delete", keys: ["⌘", "⌫"]))
+            }
+        } else {
+            shortcuts = [
+                CommandMenuShortcutItem(label: "Run", keys: ["↩"]),
+                CommandMenuShortcutItem(label: "Send Feedback", keys: ["⌘", "⇧", "↩"])
             ]
         }
 
-        guard let selectedTask else { return [] }
-
-        var shortcuts = [
-            CommandMenuShortcutItem(label: "Open", keys: ["↩"])
-        ]
-
-        if selectedTask.isRunning {
-            shortcuts.append(CommandMenuShortcutItem(label: "Stop", keys: ["⌫"]))
+        if hasRunningTasks {
+            shortcuts.append(CommandMenuShortcutItem(label: "Kill All", keys: ["⌘", "⇧", "⌫"]))
         }
 
-        shortcuts.append(CommandMenuShortcutItem(label: "Delete", keys: ["⌘", "⌫"]))
         return shortcuts
     }
 
@@ -163,13 +198,26 @@ struct CommandMenuView: View {
         !sortedTasks.isEmpty
     }
 
+    private var hasRunningTasks: Bool {
+        sortedTasks.contains(where: \.isRunning)
+    }
+
+    private var hasVisibleList: Bool {
+        queryIsEmpty ? hasTasks : !queryActions.isEmpty
+    }
+
     private var dividerCount: CGFloat {
-        hasTasks ? 2 : 1
+        hasVisibleList ? 2 : 1
     }
 
     private var estimatedTaskListHeight: CGFloat {
-        guard hasTasks else { return 0 }
-        return CGFloat(sortedTasks.count) * Self.estimatedTaskRowHeight + (Self.taskListVerticalPadding * 2)
+        if queryIsEmpty {
+            guard hasTasks else { return 0 }
+            return CGFloat(sortedTasks.count) * Self.estimatedTaskRowHeight + (Self.taskListVerticalPadding * 2)
+        }
+
+        guard !queryActions.isEmpty else { return 0 }
+        return CGFloat(queryActions.count) * Self.estimatedTaskRowHeight + (Self.taskListVerticalPadding * 2)
     }
 
     private var taskListContentHeight: CGFloat {
@@ -185,7 +233,7 @@ struct CommandMenuView: View {
     }
 
     private var taskSectionHeight: CGFloat {
-        guard hasTasks else { return 0 }
+        guard hasVisibleList else { return 0 }
         return min(taskListContentHeight, maxTaskSectionHeight)
     }
 
@@ -199,18 +247,47 @@ struct CommandMenuView: View {
 
             Divider()
 
-            if hasTasks {
-                ScrollViewReader { proxy in
+            if hasVisibleList {
+                if queryIsEmpty {
+                    ScrollViewReader { proxy in
+                        ScrollView {
+                            LazyVStack(spacing: 0) {
+                                ForEach(sortedTasks) { task in
+                                    CommandMenuTaskRow(
+                                        task: task,
+                                        isSelected: task.id == selectedTaskID,
+                                        onSelect: { selectedTaskID = task.id },
+                                        onOpen: { open(task) }
+                                    )
+                                    .id(task.id)
+                                }
+                            }
+                            .padding(.vertical, Self.taskListVerticalPadding)
+                            .reportHeight(CommandMenuTaskListContentHeightPreferenceKey.self)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .frame(height: taskSectionHeight)
+                        .onPreferenceChange(CommandMenuTaskListContentHeightPreferenceKey.self) { height in
+                            guard height > 0 else { return }
+                            measuredTaskListContentHeight = height
+                        }
+                        .onChange(of: selectedTaskID) { _, selectedTaskID in
+                            guard let selectedTaskID else { return }
+                            withAnimation(.easeOut(duration: 0.12)) {
+                                proxy.scrollTo(selectedTaskID, anchor: .center)
+                            }
+                        }
+                    }
+                } else {
                     ScrollView {
                         LazyVStack(spacing: 0) {
-                            ForEach(sortedTasks) { task in
-                                CommandMenuTaskRow(
-                                    task: task,
-                                    isSelected: task.id == selectedTaskID,
-                                    onSelect: { selectedTaskID = task.id },
-                                    onOpen: { open(task) }
+                            ForEach(queryActions) { action in
+                                CommandMenuQueryActionRow(
+                                    action: action,
+                                    isSelected: action.kind == selectedQueryActionID,
+                                    onSelect: { selectedQueryActionID = action.kind },
+                                    onActivate: { run(action) }
                                 )
-                                .id(task.id)
                             }
                         }
                         .padding(.vertical, Self.taskListVerticalPadding)
@@ -221,12 +298,6 @@ struct CommandMenuView: View {
                     .onPreferenceChange(CommandMenuTaskListContentHeightPreferenceKey.self) { height in
                         guard height > 0 else { return }
                         measuredTaskListContentHeight = height
-                    }
-                    .onChange(of: selectedTaskID) { _, selectedTaskID in
-                        guard let selectedTaskID else { return }
-                        withAnimation(.easeOut(duration: 0.12)) {
-                            proxy.scrollTo(selectedTaskID, anchor: .center)
-                        }
                     }
                 }
 
@@ -243,15 +314,20 @@ struct CommandMenuView: View {
                 .stroke(Color.black.opacity(0.08), lineWidth: 1)
         )
         .onAppear {
-            selectFirstTaskIfNeeded()
+            syncSelectionForCurrentMode()
             syncPanelSize()
         }
         .onChange(of: sortedTasks.map(\.id)) { _, _ in
+            guard queryIsEmpty else { return }
             if let selectedTaskID,
                sortedTasks.contains(where: { $0.id == selectedTaskID }) {
                 return
             }
             selectFirstTaskIfNeeded()
+        }
+        .onChange(of: queryIsEmpty) { _, _ in
+            measuredTaskListContentHeight = 0
+            syncSelectionForCurrentMode()
         }
         .onChange(of: panelHeight) { _, _ in
             syncPanelSize()
@@ -295,17 +371,19 @@ struct CommandMenuView: View {
 
     private var bottomBar: some View {
         HStack(spacing: 14) {
-            Button(action: openSettings) {
-                Image(systemName: "gearshape.fill")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 28, height: 28)
-                    .background(
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .fill(Color.black.opacity(0.04))
-                    )
-            }
-            .buttonStyle(.plain)
+            CommandMenuIconButton(
+                symbolName: "gearshape.fill",
+                popoverLabel: "Settings",
+                shortcutKeys: ["⌘", ","],
+                action: openSettings
+            )
+
+            CommandMenuIconButton(
+                symbolName: "bubble.left.fill",
+                popoverLabel: "Feedback",
+                shortcutKeys: ["⌘", "⇧", "F"],
+                action: openFeedback
+            )
 
             Spacer(minLength: 16)
 
@@ -329,13 +407,13 @@ struct CommandMenuView: View {
             return
         }
 
-        appDelegate.launchTaskFromCommandMenu(query: trimmedQuery)
-        query = ""
-        appDelegate.closeCommandMenu()
+        activateSelectedQueryAction()
     }
 
     private func handleInputKeyDown(_ event: NSEvent) -> Bool {
         let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        let hasCommand = modifiers.contains(.command)
+        let hasShift = modifiers.contains(.shift)
 
         switch event.keyCode {
         case 125:
@@ -345,12 +423,26 @@ struct CommandMenuView: View {
             moveSelection(by: -1)
             return true
         case 36, 76:
+            if hasCommand && hasShift && !queryIsEmpty {
+                sendQueryAsFeedback()
+                return true
+            }
+
             if queryIsEmpty {
                 openSelectedTask()
                 return true
             }
+
+            activateSelectedQueryAction()
+            return true
         case 51:
-            if modifiers.contains(.command), queryIsEmpty {
+            if hasCommand && hasShift {
+                guard hasRunningTasks else { return false }
+                killAllRunningTasks()
+                return true
+            }
+
+            if hasCommand, queryIsEmpty {
                 deleteSelectedTask()
                 return true
             }
@@ -359,8 +451,13 @@ struct CommandMenuView: View {
                 stopSelectedTask()
                 return true
             }
+        case 3:
+            if hasCommand && hasShift {
+                openFeedback()
+                return true
+            }
         case 43:
-            if modifiers.contains(.command) {
+            if hasCommand {
                 openSettings()
                 return true
             }
@@ -375,9 +472,28 @@ struct CommandMenuView: View {
         selectedTaskID = sortedTasks.first?.id
     }
 
-    private func moveSelection(by delta: Int) {
-        guard !sortedTasks.isEmpty else { return }
+    private func selectFirstQueryActionIfNeeded() {
+        selectedQueryActionID = queryActions.first?.kind
+    }
 
+    private func syncSelectionForCurrentMode() {
+        if queryIsEmpty {
+            selectFirstTaskIfNeeded()
+        } else if selectedQueryAction == nil {
+            selectFirstQueryActionIfNeeded()
+        }
+    }
+
+    private func moveSelection(by delta: Int) {
+        if queryIsEmpty {
+            moveTaskSelection(by: delta)
+        } else {
+            moveQueryActionSelection(by: delta)
+        }
+    }
+
+    private func moveTaskSelection(by delta: Int) {
+        guard !sortedTasks.isEmpty else { return }
         guard let currentSelectionID = selectedTaskID,
               let currentIndex = sortedTasks.firstIndex(where: { $0.id == currentSelectionID }) else {
             selectFirstTaskIfNeeded()
@@ -386,6 +502,34 @@ struct CommandMenuView: View {
 
         let nextIndex = min(max(currentIndex + delta, 0), sortedTasks.count - 1)
         selectedTaskID = sortedTasks[nextIndex].id
+    }
+
+    private func moveQueryActionSelection(by delta: Int) {
+        guard !queryActions.isEmpty else { return }
+        guard let currentSelectionID = selectedQueryActionID,
+              let currentIndex = queryActions.firstIndex(where: { $0.kind == currentSelectionID }) else {
+            selectFirstQueryActionIfNeeded()
+            return
+        }
+
+        let nextIndex = min(max(currentIndex + delta, 0), queryActions.count - 1)
+        selectedQueryActionID = queryActions[nextIndex].kind
+    }
+
+    private func activateSelectedQueryAction() {
+        guard let action = selectedQueryAction ?? queryActions.first else { return }
+        run(action)
+    }
+
+    private func run(_ action: CommandMenuQueryAction) {
+        switch action.kind {
+        case .runTask:
+            appDelegate.launchTaskFromCommandMenu(query: trimmedQuery)
+            query = ""
+            appDelegate.closeCommandMenu()
+        case .sendFeedback:
+            sendQueryAsFeedback()
+        }
     }
 
     private func openSelectedTask() {
@@ -410,6 +554,21 @@ struct CommandMenuView: View {
 
     private func openSettings() {
         appDelegate.openSettingsFromCommandMenu()
+    }
+
+    private func openFeedback() {
+        appDelegate.openFeedbackFromCommandMenu()
+    }
+
+    private func sendQueryAsFeedback() {
+        guard !queryIsEmpty else { return }
+        let feedbackDraft = trimmedQuery
+        query = ""
+        appDelegate.openFeedbackFromCommandMenu(draft: feedbackDraft)
+    }
+
+    private func killAllRunningTasks() {
+        appDelegate.stopAllRunningTaskRecords()
     }
 
     private func syncPanelSize() {
@@ -481,6 +640,70 @@ private struct CommandMenuTaskRow: View {
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)
                 }
+        }
+    }
+}
+
+private struct CommandMenuQueryActionRow: View {
+    let action: CommandMenuQueryAction
+    let isSelected: Bool
+    let onSelect: () -> Void
+    let onActivate: () -> Void
+
+    var body: some View {
+        Button(action: onActivate) {
+            HStack(spacing: 12) {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Color.black.opacity(0.06))
+                    .frame(width: 28, height: 28)
+                    .overlay {
+                        Image(systemName: action.symbolName)
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                    }
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(action.title)
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+
+                    Text(action.subtitle)
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+
+                Spacer(minLength: 16)
+
+                HStack(spacing: 4) {
+                    ForEach(action.shortcutKeys, id: \.self) { key in
+                        Text(key)
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(Color.secondary)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 3)
+                            .background(
+                                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                    .fill(Color.black.opacity(0.08))
+                            )
+                    }
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 11)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(isSelected ? Color.black.opacity(0.08) : .clear)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal, 8)
+        .onHover { isHovering in
+            if isHovering {
+                onSelect()
+            }
         }
     }
 }
@@ -569,6 +792,70 @@ private struct CommandMenuShortcutItem: Identifiable {
 
     var id: String {
         "\(label)-\(keys.joined())"
+    }
+}
+
+private struct CommandMenuQueryAction: Identifiable {
+    enum Kind: String {
+        case runTask
+        case sendFeedback
+    }
+
+    let kind: Kind
+    let title: String
+    let subtitle: String
+    let symbolName: String
+    let shortcutKeys: [String]
+
+    var id: Kind { kind }
+}
+
+private struct CommandMenuIconButton: View {
+    let symbolName: String
+    let popoverLabel: String
+    let shortcutKeys: [String]
+    let action: () -> Void
+    @State private var showsPopover = false
+    @State private var pendingPopoverWorkItem: DispatchWorkItem?
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: symbolName)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 28, height: 28)
+                .background(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(Color.black.opacity(0.04))
+                )
+        }
+        .buttonStyle(.plain)
+        .onHover(perform: handleHover)
+        .popover(isPresented: $showsPopover, arrowEdge: .bottom) {
+            CommandMenuShortcut(label: popoverLabel, keys: shortcutKeys)
+                .padding(12)
+        }
+        .onDisappear {
+            pendingPopoverWorkItem?.cancel()
+            pendingPopoverWorkItem = nil
+            showsPopover = false
+        }
+    }
+
+    private func handleHover(_ isHovering: Bool) {
+        pendingPopoverWorkItem?.cancel()
+        pendingPopoverWorkItem = nil
+
+        guard isHovering else {
+            showsPopover = false
+            return
+        }
+
+        let workItem = DispatchWorkItem {
+            showsPopover = true
+        }
+        pendingPopoverWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12, execute: workItem)
     }
 }
 
