@@ -358,11 +358,6 @@ struct CommandMenuView: View {
                 )
                 .frame(height: max(textHeight, 22))
                 .frame(maxWidth: .infinity, alignment: .leading)
-
-                VoiceTrailingIndicator(
-                    state: appDelegate.commandMenuVoiceState,
-                    level: appDelegate.commandMenuVoiceLevel
-                )
             }
         }
         .padding(.horizontal, 18)
