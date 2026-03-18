@@ -491,6 +491,29 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         NSApp.activate(ignoringOtherApps: true)
     }
 
+    func updateCommandMenuSize(_ size: CGSize) {
+        guard let panel = commandMenuPanel else { return }
+
+        let normalizedSize = CGSize(width: ceil(size.width), height: ceil(size.height))
+        guard normalizedSize.width > 0, normalizedSize.height > 0 else { return }
+        guard abs(panel.frame.width - normalizedSize.width) > 0.5 ||
+              abs(panel.frame.height - normalizedSize.height) > 0.5 else { return }
+
+        let previousTop = panel.frame.maxY
+        let previousOriginX = panel.frame.minX
+
+        panel.setContentSize(normalizedSize)
+
+        var nextOrigin = NSPoint(x: previousOriginX, y: previousTop - panel.frame.height)
+        if let screen = panel.screen ?? NSScreen.screens.first(where: { $0.visibleFrame.intersects(panel.frame) }) ?? NSScreen.main {
+            let visibleFrame = screen.visibleFrame
+            nextOrigin.x = max(visibleFrame.minX + 8, min(nextOrigin.x, visibleFrame.maxX - panel.frame.width - 8))
+            nextOrigin.y = max(visibleFrame.minY + 8, min(nextOrigin.y, visibleFrame.maxY - panel.frame.height - 8))
+        }
+
+        panel.setFrameOrigin(nextOrigin)
+    }
+
     private func positionCommandMenu(for source: CommandMenuPresentationSource) {
         guard let panel = commandMenuPanel,
               let origin = commandMenuOrigin(for: source) else { return }
