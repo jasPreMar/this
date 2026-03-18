@@ -169,6 +169,7 @@ class FloatingPanel: NSPanel {
     private(set) var taskLastActivityAt: Date?
     private(set) var preservesTaskHistory = false
     let taskId = UUID()
+    var persistedSessionId: String?
     var isCommandKeyHeld = false
     var onCommandKeyDropped: (() -> Void)?
     var onFeedbackShake: (() -> Void)?
@@ -400,7 +401,8 @@ class FloatingPanel: NSPanel {
         message: String,
         screenshotURL: URL? = nil,
         workingDirectoryURL: URL? = nil,
-        centerWindow: Bool = false
+        centerWindow: Bool = false,
+        restoreOnly: Bool = false
     ) {
         isTerminalMode = true
         isCursorFollowing = false
@@ -431,6 +433,15 @@ class FloatingPanel: NSPanel {
         makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
         notifyTaskStateChanged()
+
+        if restoreOnly {
+            // Restoring a persisted session — chat history is already populated
+            searchViewModel.query = ""
+            searchViewModel.claudeManager = nil
+            searchViewModel.isChatMode = true
+            searchViewModel.currentSessionWorkingDirectoryURL = workingDirectoryURL
+            return
+        }
 
         // Switch to chat mode — the PanelContentView handles the rest
         searchViewModel.chatHistory.append((role: "user", text: searchViewModel.query, events: []))
@@ -526,6 +537,31 @@ class FloatingPanel: NSPanel {
         notifyTaskStateChanged()
     }
 
+    func saveChatSession() {
+        guard preservesTaskHistory, !searchViewModel.chatHistory.isEmpty else { return }
+
+        let id = persistedSessionId ?? UUID().uuidString
+        persistedSessionId = id
+
+        let messages = searchViewModel.chatHistory.map {
+            PersistedMessage(role: $0.role, text: $0.text)
+        }
+
+        let session = PersistedChatSession(
+            id: id,
+            sessionId: searchViewModel.currentSessionId,
+            title: taskDisplayTitle,
+            subtitle: taskDisplaySubtitle,
+            messages: messages,
+            startedAt: taskStartedAt ?? Date(),
+            completedAt: taskCompletedAt,
+            lastActivityAt: taskLastActivityAt ?? Date(),
+            workingDirectoryPath: searchViewModel.currentSessionWorkingDirectoryURL?.path
+        )
+
+        ChatSessionStore.shared.save(session)
+    }
+
     private func markTaskActivity(completed: Bool = false) {
         guard preservesTaskHistory else { return }
 
@@ -559,6 +595,7 @@ class FloatingPanel: NSPanel {
             let now = Date()
             taskCompletedAt = now
             taskLastActivityAt = now
+            saveChatSession()
         }
 
         notifyTaskStateChanged()
@@ -782,6 +819,7 @@ class FloatingPanel: NSPanel {
         focusRestorationState = nil
         isDestroyingTaskWindow = false
 
+        saveChatSession()
         removeAllMonitors()
         voiceController.cancel()
         super.close()

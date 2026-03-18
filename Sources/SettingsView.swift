@@ -507,11 +507,11 @@ private struct SettingsCard<Content: View>: View {
     var body: some View {
         content
             .padding(padding)
-            .background(Color.white.opacity(0.96))
+            .background(Color(nsColor: .controlBackgroundColor))
             .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .stroke(Color.black.opacity(0.035), lineWidth: 1)
+                    .stroke(Color(nsColor: .separatorColor).opacity(0.5), lineWidth: 1)
             )
             .shadow(color: Color.black.opacity(0.05), radius: 22, y: 8)
     }
