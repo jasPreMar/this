@@ -3,6 +3,11 @@ import SwiftUI
 
 class FloatingPanel: NSPanel {
     private static let maxPanelDimension: CGFloat = 392
+    private enum InvokeHoldBehavior {
+        case cursorFollow
+        case anchoredInput
+    }
+
     private struct MouseShakeDetector {
         private struct Segment {
             let vector: CGVector
@@ -164,6 +169,7 @@ class FloatingPanel: NSPanel {
     private var shouldRestoreFocusOnClose = true
     private let voiceController = VoiceDictationController()
     private var mouseShakeDetector = MouseShakeDetector()
+    private var invokeHoldBehavior: InvokeHoldBehavior?
     private(set) var taskStartedAt: Date?
     private(set) var taskCompletedAt: Date?
     private(set) var taskLastActivityAt: Date?
@@ -672,6 +678,7 @@ class FloatingPanel: NSPanel {
     /// Called when the invoke hotkey is pressed. Shows a minimal icon indicator immediately,
     /// then expands to the full panel on the first cursor move.
     func startCommandKeyMode(with modifierFlags: NSEvent.ModifierFlags) {
+        invokeHoldBehavior = .cursorFollow
         isCommandKeyHeld = true
         currentModifierFlags = modifierFlags
         searchViewModel.isCommandKeyMode = true
@@ -699,7 +706,19 @@ class FloatingPanel: NSPanel {
 
     /// Called when the invoke hotkey is released. Anchors the panel and shows the input row.
     /// If the panel was never shown (cursor didn't move), discard silently.
-    func endCommandKeyMode() {
+    func endInvokeHoldMode() {
+        switch invokeHoldBehavior {
+        case .cursorFollow:
+            endCursorFollowInvokeHoldMode()
+        case .anchoredInput:
+            stopVoiceModeIfNeeded()
+            invokeHoldBehavior = nil
+        case nil:
+            break
+        }
+    }
+
+    private func endCursorFollowInvokeHoldMode() {
         if let m = commandKeyMouseMonitor { NSEvent.removeMonitor(m); commandKeyMouseMonitor = nil }
         if let m = globalMouseMonitor { NSEvent.removeMonitor(m); globalMouseMonitor = nil }
         if let m = localMouseMonitor { NSEvent.removeMonitor(m); localMouseMonitor = nil }
@@ -737,6 +756,7 @@ class FloatingPanel: NSPanel {
             self.dismiss()
             return event
         }
+        invokeHoldBehavior = nil
     }
 
     /// Re-enter cursor-following on an already-visible panel.
@@ -748,6 +768,7 @@ class FloatingPanel: NSPanel {
 
         isCommandKeyHeld = true
         currentModifierFlags = modifierFlags
+        invokeHoldBehavior = .cursorFollow
         isCommandKeyVisible = true
         isCursorFollowing = true
         mouseShakeDetector.reset()
@@ -768,12 +789,24 @@ class FloatingPanel: NSPanel {
         }
     }
 
+    func startAnchoredVoiceMode(with modifierFlags: NSEvent.ModifierFlags) {
+        invokeHoldBehavior = .anchoredInput
+        isCommandKeyHeld = true
+        currentModifierFlags = modifierFlags
+        isCursorFollowing = false
+        searchViewModel.isMinimalMode = false
+        searchViewModel.isCommandKeyMode = false
+        makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        syncVoiceModeWithCurrentModifiers()
+    }
+
     private func handleCommandKeyMouseMove() {
         // Detect missed invoke hotkey releases (e.g., consumed by system).
         if !InvokeHotKey.stored().isPressed(in: NSEvent.modifierFlags) {
             isCommandKeyHeld = false
             onCommandKeyDropped?()
-            endCommandKeyMode()
+            endInvokeHoldMode()
             return
         }
 
@@ -844,6 +877,7 @@ class FloatingPanel: NSPanel {
         isTerminalMode = false
         isCommandKeyVisible = false
         isCursorFollowing = false
+        invokeHoldBehavior = nil
         currentModifierFlags = []
         isCommandKeyHeld = false
         preservesTaskHistory = false
@@ -883,6 +917,7 @@ class FloatingPanel: NSPanel {
         orderOut(nil)
         isCommandKeyVisible = false
         isCursorFollowing = false
+        invokeHoldBehavior = nil
         currentModifierFlags = []
         isCommandKeyHeld = false
         notifyTaskStateChanged()
@@ -899,10 +934,9 @@ class FloatingPanel: NSPanel {
 
     private func startVoiceModeIfNeeded() {
         guard isVisible,
-              !isTerminalMode,
-              !searchViewModel.isChatMode,
               isCommandKeyHeld,
-              searchViewModel.isCommandKeyMode,
+              canUseVoiceInputDuringInvokeHold,
+              !isActivelyStreamingResponse,
               !searchViewModel.isVoiceModeActive else { return }
 
         voiceController.start()
@@ -910,10 +944,9 @@ class FloatingPanel: NSPanel {
 
     private func syncVoiceModeWithCurrentModifiers() {
         guard isVisible,
-              !isTerminalMode,
-              !searchViewModel.isChatMode,
               isCommandKeyHeld,
-              searchViewModel.isCommandKeyMode else { return }
+              canUseVoiceInputDuringInvokeHold,
+              !isActivelyStreamingResponse else { return }
 
         guard AppSettings.autoVoiceEnabled || currentModifierFlags.contains(.shift) else {
             cancelVoiceModeIfNeeded()
@@ -962,6 +995,28 @@ class FloatingPanel: NSPanel {
                 guard let self, self.searchViewModel.voiceState == .failed(message) else { return }
                 self.searchViewModel.voiceState = .idle
             }
+        }
+    }
+
+    private var canUseVoiceInputDuringInvokeHold: Bool {
+        switch invokeHoldBehavior {
+        case .cursorFollow:
+            return searchViewModel.isCommandKeyMode
+        case .anchoredInput:
+            return true
+        case nil:
+            return false
+        }
+    }
+
+    private var isActivelyStreamingResponse: Bool {
+        guard let manager = searchViewModel.claudeManager else { return false }
+
+        switch manager.status {
+        case .waiting, .streaming:
+            return true
+        case .done, .error:
+            return false
         }
     }
 
