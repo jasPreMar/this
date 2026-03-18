@@ -135,8 +135,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         if invokeKeyDown && !commandKeyHeld {
             commandKeyHeld = true
 
-            if let selectedPanel = selectedVisiblePanel(),
-               selectedPanel.searchViewModel.isChatMode {
+            if let selectedPanel = selectedVisiblePanel() {
                 commandKeyPanel = selectedPanel
                 selectedPanel.isCommandKeyHeld = true
                 selectedPanel.startAnchoredVoiceMode(with: modifierFlags)
