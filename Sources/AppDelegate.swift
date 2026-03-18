@@ -86,6 +86,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         setupStatusItem()
         checkForUpdateInBackground()
         setupRightClickTapIfNeeded()
+        loadPersistedChatSessions()
         showOnboardingIfNeeded()
 
         // Global hotkey: selected invoke key + Space toggles the task overlay.
@@ -335,12 +336,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     @objc private func handleStatusKillAll() {
         closeCommandMenu()
         for panel in panels {
+            panel.saveChatSession()
             panel.searchViewModel.claudeManager?.stop()
             panel.destroyPersistentTaskWindow()
         }
         panels.removeAll()
+        // Reload persisted sessions so they remain visible
         taskRecords.removeAll()
         taskRecordLookup.removeAll()
+        loadPersistedChatSessions()
     }
 
     @objc private func handleStatusQuit() {
@@ -489,6 +493,29 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         commandMenuPanel?.makeKeyAndOrderFront(nil)
         statusItem?.button?.highlight(source == .statusItem)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    func updateCommandMenuSize(_ size: CGSize) {
+        guard let panel = commandMenuPanel else { return }
+
+        let normalizedSize = CGSize(width: ceil(size.width), height: ceil(size.height))
+        guard normalizedSize.width > 0, normalizedSize.height > 0 else { return }
+        guard abs(panel.frame.width - normalizedSize.width) > 0.5 ||
+              abs(panel.frame.height - normalizedSize.height) > 0.5 else { return }
+
+        let previousTop = panel.frame.maxY
+        let previousOriginX = panel.frame.minX
+
+        panel.setContentSize(normalizedSize)
+
+        var nextOrigin = NSPoint(x: previousOriginX, y: previousTop - panel.frame.height)
+        if let screen = panel.screen ?? NSScreen.screens.first(where: { $0.visibleFrame.intersects(panel.frame) }) ?? NSScreen.main {
+            let visibleFrame = screen.visibleFrame
+            nextOrigin.x = max(visibleFrame.minX + 8, min(nextOrigin.x, visibleFrame.maxX - panel.frame.width - 8))
+            nextOrigin.y = max(visibleFrame.minY + 8, min(nextOrigin.y, visibleFrame.maxY - panel.frame.height - 8))
+        }
+
+        panel.setFrameOrigin(nextOrigin)
     }
 
     private func positionCommandMenu(for source: CommandMenuPresentationSource) {
@@ -678,7 +705,49 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     }
 
     func openTaskRecord(_ record: TaskSessionRecord) {
-        record.panel?.reopenPersistentTaskWindow()
+        if let panel = record.panel {
+            panel.reopenPersistentTaskWindow()
+            return
+        }
+
+        // Reopen a persisted session that has no live panel
+        guard let persistedId = record.persistedSessionId else { return }
+        let sessions = ChatSessionStore.shared.loadAll()
+        guard let session = sessions.first(where: { $0.id == persistedId }) else { return }
+
+        let panel = makePanel()
+        panels.append(panel)
+        panel.persistedSessionId = persistedId
+
+        // Restore working directory
+        let workingDirectoryURL: URL?
+        if let path = session.workingDirectoryPath {
+            workingDirectoryURL = URL(fileURLWithPath: path)
+        } else {
+            workingDirectoryURL = nil
+        }
+
+        // Populate chat history from persisted messages
+        panel.searchViewModel.chatHistory = session.messages.map {
+            (role: $0.role, text: $0.text, events: [] as [StreamEvent])
+        }
+        panel.searchViewModel.currentSessionId = session.sessionId
+        panel.searchViewModel.currentSessionWorkingDirectoryURL = workingDirectoryURL
+        panel.searchViewModel.isChatMode = true
+
+        // Transition to terminal mode to show the restored chat
+        panel.transitionToTerminal(
+            message: "",
+            workingDirectoryURL: workingDirectoryURL,
+            centerWindow: true,
+            restoreOnly: true
+        )
+
+        // Re-associate the record with the live panel
+        record.panel = panel
+        let key = ObjectIdentifier(panel)
+        taskRecordLookup[key] = record
+        record.sync(from: panel)
     }
 
     func stopTaskRecord(_ record: TaskSessionRecord) {
@@ -686,6 +755,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     }
 
     func deleteTaskRecord(_ record: TaskSessionRecord) {
+        // Delete persisted session from disk
+        if let persistedId = record.persistedSessionId {
+            ChatSessionStore.shared.delete(id: persistedId)
+        } else if let panel = record.panel, let persistedId = panel.persistedSessionId {
+            ChatSessionStore.shared.delete(id: persistedId)
+        }
+
         guard let panel = record.panel else {
             taskRecords.removeAll { $0.id == record.id }
             return
@@ -711,6 +787,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         }
 
         let record = TaskSessionRecord(panel: panel)
+        record.persistedSessionId = panel.persistedSessionId
         taskRecordLookup[key] = record
         taskRecords.append(record)
         sortTaskRecords()
@@ -735,8 +812,26 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
 
         let key = ObjectIdentifier(panel)
         if let record = taskRecordLookup.removeValue(forKey: key) {
-            taskRecords.removeAll { $0.id == record.id }
+            // Keep the record in the list if it has a persisted session on disk
+            if let persistedId = panel.persistedSessionId {
+                record.panel = nil
+                record.persistedSessionId = persistedId
+                record.isWindowVisible = false
+                record.isRunning = false
+            } else {
+                taskRecords.removeAll { $0.id == record.id }
+            }
         }
+    }
+
+    private func loadPersistedChatSessions() {
+        let existingPersistedIds = Set(taskRecords.compactMap(\.persistedSessionId))
+        let sessions = ChatSessionStore.shared.loadAll()
+        for session in sessions where !existingPersistedIds.contains(session.id) {
+            let record = TaskSessionRecord(persisted: session)
+            taskRecords.append(record)
+        }
+        sortTaskRecords()
     }
 
     private func sortTaskRecords() {
