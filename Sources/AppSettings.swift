@@ -27,6 +27,9 @@ enum AppSettings {
         static let defaultModel = "defaultClaudeModel"
         static let thinkingEnabled = "defaultClaudeThinkingEnabled"
         static let fastModeEnabled = "defaultClaudeFastModeEnabled"
+        static let ghostCursorEnabled = "ghostCursorEnabled"
+        static let ghostCursorClickSoundEnabled = "ghostCursorClickSoundEnabled"
+        static let ghostCursorDebugLabelsEnabled = "ghostCursorDebugLabelsEnabled"
     }
 
     static func registerDefaults(in defaults: UserDefaults = .standard) {
@@ -36,6 +39,9 @@ enum AppSettings {
             Keys.defaultModel: ClaudeModelPreset.sonnet46.rawValue,
             Keys.thinkingEnabled: false,
             Keys.fastModeEnabled: true,
+            Keys.ghostCursorEnabled: true,
+            Keys.ghostCursorClickSoundEnabled: false,
+            Keys.ghostCursorDebugLabelsEnabled: false,
         ])
     }
 
@@ -77,6 +83,21 @@ enum AppSettings {
         set { UserDefaults.standard.set(newValue, forKey: Keys.fastModeEnabled) }
     }
 
+    static var ghostCursorEnabled: Bool {
+        get { UserDefaults.standard.bool(forKey: Keys.ghostCursorEnabled) }
+        set { UserDefaults.standard.set(newValue, forKey: Keys.ghostCursorEnabled) }
+    }
+
+    static var ghostCursorClickSoundEnabled: Bool {
+        get { UserDefaults.standard.bool(forKey: Keys.ghostCursorClickSoundEnabled) }
+        set { UserDefaults.standard.set(newValue, forKey: Keys.ghostCursorClickSoundEnabled) }
+    }
+
+    static var ghostCursorDebugLabelsEnabled: Bool {
+        get { UserDefaults.standard.bool(forKey: Keys.ghostCursorDebugLabelsEnabled) }
+        set { UserDefaults.standard.set(newValue, forKey: Keys.ghostCursorDebugLabelsEnabled) }
+    }
+
     static var claudeThinkingMode: String {
         thinkingEnabled ? "enabled" : "disabled"
     }
@@ -115,6 +136,15 @@ final class AppSettingsStore: ObservableObject {
     @Published var fastModeEnabled: Bool {
         didSet { AppSettings.fastModeEnabled = fastModeEnabled }
     }
+    @Published var ghostCursorEnabled: Bool {
+        didSet { AppSettings.ghostCursorEnabled = ghostCursorEnabled }
+    }
+    @Published var ghostCursorClickSoundEnabled: Bool {
+        didSet { AppSettings.ghostCursorClickSoundEnabled = ghostCursorClickSoundEnabled }
+    }
+    @Published var ghostCursorDebugLabelsEnabled: Bool {
+        didSet { AppSettings.ghostCursorDebugLabelsEnabled = ghostCursorDebugLabelsEnabled }
+    }
 
     init() {
         AppSettings.registerDefaults()
@@ -124,5 +154,8 @@ final class AppSettingsStore: ObservableObject {
         defaultModel = AppSettings.defaultModel
         thinkingEnabled = AppSettings.thinkingEnabled
         fastModeEnabled = AppSettings.fastModeEnabled
+        ghostCursorEnabled = AppSettings.ghostCursorEnabled
+        ghostCursorClickSoundEnabled = AppSettings.ghostCursorClickSoundEnabled
+        ghostCursorDebugLabelsEnabled = AppSettings.ghostCursorDebugLabelsEnabled
     }
 }

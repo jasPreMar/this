@@ -5,10 +5,13 @@ class PTTSoundPlayer {
     private static let resourceBundleName = "HyperPointer_HyperPointer"
     private let pressSound: NSSound?
     private let releaseSound: NSSound?
+    private let ghostCursorClickSound: NSSound?
 
     init() {
         pressSound = Self.loadSound(named: "C5")
         releaseSound = Self.loadSound(named: "A4")
+        ghostCursorClickSound = Self.loadSound(named: "A4")
+        ghostCursorClickSound?.volume = 0.25
     }
 
     func playPress() {
@@ -21,6 +24,12 @@ class PTTSoundPlayer {
         guard let s = releaseSound else { return }
         s.stop()
         s.play()
+    }
+
+    func playGhostCursorClick() {
+        guard let sound = ghostCursorClickSound else { return }
+        sound.stop()
+        sound.play()
     }
 
     private static func loadSound(named name: String) -> NSSound? {

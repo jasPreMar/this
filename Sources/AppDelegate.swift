@@ -77,10 +77,17 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     private var feedbackPopover: NSPopover?
     private let soundPlayer = PTTSoundPlayer()
     private var taskRecordLookup: [ObjectIdentifier: TaskSessionRecord] = [:]
+    private lazy var ghostCursorStore = GhostCursorStore(playClickSound: { [weak self] in
+        self?.soundPlayer.playGhostCursorClick()
+    })
+    private var ghostCursorOverlayCoordinator: GhostCursorOverlayCoordinator?
+    private var workspaceNotificationObservers: [NSObjectProtocol] = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         sharedAppDelegate = self
         AppSettings.registerDefaults()
+        ghostCursorOverlayCoordinator = GhostCursorOverlayCoordinator(store: ghostCursorStore)
+        setupGhostCursorWorkspaceObservers()
         setupMainMenu()
         updaterController = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: self, userDriverDelegate: nil)
         setupStatusItem()
@@ -337,6 +344,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         for panel in panels {
             panel.searchViewModel.claudeManager?.stop()
             panel.destroyPersistentTaskWindow()
+            ghostCursorStore.unregisterTask(panel.taskId)
         }
         panels.removeAll()
         taskRecords.removeAll()
@@ -646,27 +654,59 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         panel.onFeedbackShake = { [weak self] in
             self?.openFeedbackPage()
         }
-        panel.onMessageSent = { [weak self] in
+        panel.onMessageSent = { [weak self, weak panel] in
             if UserDefaults.standard.bool(forKey: "chimeEnabled") {
                 self?.soundPlayer.playPress()
             }
+            guard let self, let panel else { return }
+            self.ghostCursorStore.registerTask(panel.taskId, anchorPoint: panel.ghostCursorAnchorPoint)
+            self.ghostCursorStore.setTaskVisible(panel.taskId, visible: false)
         }
-        panel.onStreamingComplete = { [weak self] in
+        panel.onStreamingComplete = { [weak self, weak panel] in
             if UserDefaults.standard.bool(forKey: "chimeEnabled") {
                 self?.soundPlayer.playRelease()
             }
+            guard let self, let panel else { return }
+            self.ghostCursorStore.setTaskVisible(panel.taskId, visible: false)
         }
         panel.onPersistentTaskStarted = { [weak self, weak panel] _ in
             guard let self, let panel else { return }
             self.registerTaskRecord(for: panel)
+            self.ghostCursorStore.registerTask(panel.taskId, anchorPoint: panel.ghostCursorAnchorPoint)
+            self.ghostCursorStore.setTaskVisible(panel.taskId, visible: false)
         }
         panel.onTaskStateChanged = { [weak self, weak panel] _ in
             guard let self, let panel else { return }
             self.syncTaskRecord(for: panel)
+            self.ghostCursorStore.registerTask(panel.taskId, anchorPoint: panel.ghostCursorAnchorPoint)
+            if !panel.isTaskRunning {
+                self.ghostCursorStore.setTaskVisible(panel.taskId, visible: false)
+            }
         }
         panel.onPanelDestroyed = { [weak self, weak panel] _ in
             guard let self, let panel else { return }
+            self.ghostCursorStore.unregisterTask(panel.taskId)
             self.removePanel(panel)
+        }
+        panel.onGhostCursorIntent = { [weak self, weak panel] intent in
+            guard let self, let panel else { return }
+            self.ghostCursorStore.registerTask(panel.taskId, anchorPoint: panel.ghostCursorAnchorPoint)
+
+            guard intent.revealsCursor else {
+                self.ghostCursorStore.setTaskVisible(panel.taskId, visible: false)
+                return
+            }
+
+            self.ghostCursorStore.setTaskVisible(panel.taskId, visible: true)
+            let activity = GhostCursorResolver.resolve(
+                taskId: panel.taskId,
+                intent: intent,
+                context: panel.ghostCursorResolutionContext
+            )
+            self.ghostCursorStore.emit(activity: activity)
+            if case .appLaunch(let appName) = intent {
+                self.ghostCursorStore.trackPendingLaunch(taskId: panel.taskId, appName: appName)
+            }
         }
         return panel
     }
@@ -746,6 +786,73 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             }
             return lhs.lastActivityAt > rhs.lastActivityAt
         }
+    }
+
+    private func setupGhostCursorWorkspaceObservers() {
+        let notificationCenter = NSWorkspace.shared.notificationCenter
+
+        let launched = notificationCenter.addObserver(
+            forName: NSWorkspace.didLaunchApplicationNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            self?.handleGhostCursorLaunchNotification(notification)
+        }
+
+        let activated = notificationCenter.addObserver(
+            forName: NSWorkspace.didActivateApplicationNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            self?.handleGhostCursorApplicationNotification(notification)
+        }
+
+        workspaceNotificationObservers = [launched, activated]
+    }
+
+    private func handleGhostCursorApplicationNotification(_ notification: Notification) {
+        guard let application = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else {
+            return
+        }
+        ghostCursorStore.handleActivatedApplication(
+            application,
+            windowFrame: frontmostWindowFrame(for: application.processIdentifier)
+        )
+    }
+
+    private func handleGhostCursorLaunchNotification(_ notification: Notification) {
+        guard let application = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else {
+            return
+        }
+
+        if frontmostWindowFrame(for: application.processIdentifier) != nil {
+            handleGhostCursorApplicationNotification(notification)
+        }
+    }
+
+    private func frontmostWindowFrame(for pid: pid_t) -> CGRect? {
+        guard let windowList = CGWindowListCopyWindowInfo(
+            [.optionOnScreenOnly, .excludeDesktopElements],
+            kCGNullWindowID
+        ) as? [[String: Any]] else {
+            return nil
+        }
+
+        for window in windowList {
+            guard (window[kCGWindowOwnerPID as String] as? pid_t) == pid else { continue }
+            let layer = window[kCGWindowLayer as String] as? Int ?? 999
+            guard layer == 0 else { continue }
+
+            var bounds = CGRect.zero
+            if let boundsDictionary = window[kCGWindowBounds as String] as? NSDictionary,
+               CGRectMakeWithDictionaryRepresentation(boundsDictionary as CFDictionary, &bounds),
+               bounds.width > 10,
+               bounds.height > 10 {
+                return bounds
+            }
+        }
+
+        return nil
     }
 
     func openFeedbackPage() {

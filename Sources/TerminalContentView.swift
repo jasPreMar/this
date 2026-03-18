@@ -44,6 +44,7 @@ class ClaudeProcessManager: ObservableObject {
     @Published var activeToolStartTime: Date?
     var onComplete: ((String) -> Void)?
     var onStatusChange: ((StreamStatus) -> Void)?
+    var onToolActivity: ((GhostCursorIntent) -> Void)?
     var sessionId: String?
 
     private var process: Process?
@@ -362,6 +363,7 @@ class ClaudeProcessManager: ObservableObject {
                         self.activeToolName = name
                         self.activeToolStartTime = Date()
                         self.events.append(.toolCall(id: blockId, name: name, input: inputStr))
+                        self.onToolActivity?(GhostCursorIntent.fromToolUse(name: name, inputJSONString: inputStr))
                     }
                 } else if blockType == "text",
                           let text = block["text"] as? String {

@@ -14,6 +14,9 @@ class SearchViewModel: ObservableObject {
     @Published var hoveredApp: String = ""
     @Published var hoveredParts: [String] = []
     @Published var hoveredContextIcon: NSImage?
+    @Published var hoveredElementFrame: CGRect?
+    @Published var hoveredScreenPoint: CGPoint?
+    @Published var hoveredWindowFrame: CGRect?
     @Published var hoveredWorkingDirectoryURL: URL?
     @Published var selectedText: String = ""
     @Published var isChatMode = false
@@ -143,6 +146,9 @@ class SearchViewModel: ObservableObject {
         hoveredApp = homeName
         hoveredParts = [homeName]
         hoveredContextIcon = NSWorkspace.shared.icon(forFile: homeURL.path)
+        hoveredElementFrame = nil
+        hoveredScreenPoint = nil
+        hoveredWindowFrame = nil
         hoveredWorkingDirectoryURL = homeURL
         selectedText = ""
         hoveredAppPID = 0
@@ -246,11 +252,14 @@ class SearchViewModel: ObservableObject {
 
     func updateHoveredApp() {
         let mouseLocation = NSEvent.mouseLocation
-        guard let screen = NSScreen.main else { return }
-        let cgPoint = CGPoint(x: mouseLocation.x, y: screen.frame.height - mouseLocation.y)
+        let desktopFrame = NSScreen.screens.reduce(CGRect.null) { partialResult, screen in
+            partialResult.union(screen.frame)
+        }
+        let cgPoint = CGPoint(x: mouseLocation.x, y: desktopFrame.maxY - mouseLocation.y)
 
         let cursorMoved = cgPoint != lastCursorPosition
         lastCursorPosition = cgPoint
+        hoveredScreenPoint = mouseLocation
 
         // Use Accessibility API to get the element under the cursor
         var systemWide = AXUIElementCreateSystemWide()
@@ -261,6 +270,8 @@ class SearchViewModel: ObservableObject {
             hoveredApp = ""
             hoveredParts = []
             hoveredContextIcon = nil
+            hoveredElementFrame = nil
+            hoveredWindowFrame = nil
             hoveredWorkingDirectoryURL = nil
             consecutiveContainerResults = 0
             lastContainerRole = ""
@@ -305,6 +316,8 @@ class SearchViewModel: ObservableObject {
             hoveredContextIcon = nil
         }
         hoveredWorkingDirectoryURL = resolveWorkingDirectory(for: resolvedElement, pid: pid)
+        hoveredElementFrame = resolvedElementFrame(for: resolvedElement)
+        hoveredWindowFrame = focusedWindowFrame(for: pid)
 
         // Build a description from the element hierarchy
         let description = describeElement(resolvedElement)
@@ -776,6 +789,40 @@ class SearchViewModel: ObservableObject {
     private func truncated(_ s: String, max: Int) -> String {
         if s.count <= max { return s }
         return String(s.prefix(max)) + "…"
+    }
+
+    private func resolvedElementFrame(for element: AXUIElement) -> CGRect? {
+        let (primary, _) = resolveElement(element)
+        return frame(of: primary) ?? frame(of: element)
+    }
+
+    private func focusedWindowFrame(for pid: pid_t) -> CGRect? {
+        let appElement = AXUIElementCreateApplication(pid)
+        guard let focusedWindowValue = axValue(appElement, key: kAXFocusedWindowAttribute) else {
+            return nil
+        }
+        let focusedWindow = focusedWindowValue as! AXUIElement
+        return frame(of: focusedWindow)
+    }
+
+    private func frame(of element: AXUIElement) -> CGRect? {
+        if let positionValue = axValue(element, key: kAXPositionAttribute),
+           let sizeValue = axValue(element, key: kAXSizeAttribute) {
+            let pointValue = positionValue as! AXValue
+            let sizeAXValue = sizeValue as! AXValue
+            var position = CGPoint.zero
+            var size = CGSize.zero
+            let hasPosition = AXValueGetType(pointValue) == .cgPoint
+                && AXValueGetValue(pointValue, .cgPoint, &position)
+            let hasSize = AXValueGetType(sizeAXValue) == .cgSize
+                && AXValueGetValue(sizeAXValue, .cgSize, &size)
+
+            if hasPosition && hasSize && size.width > 0 && size.height > 0 {
+                return CGRect(origin: position, size: size)
+            }
+        }
+
+        return nil
     }
 
     private func axValue(_ element: AXUIElement, key: String) -> AnyObject? {

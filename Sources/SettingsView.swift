@@ -155,6 +155,7 @@ private struct GeneralSettingsPane: View {
             VStack(spacing: 14) {
                 invokeHotkeyCard
                 soundEffectsCard
+                ghostCursorCard
                 autoVoiceCard
             }
         }
@@ -225,6 +226,64 @@ private struct GeneralSettingsPane: View {
                 Toggle("", isOn: $settingsStore.autoVoiceEnabled)
                     .toggleStyle(.switch)
                     .labelsHidden()
+            }
+        }
+    }
+
+    private var ghostCursorCard: some View {
+        SettingsCard {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack(alignment: .center, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Agent cursor")
+                            .font(.system(size: 15, weight: .semibold))
+                        Text("Show a synthetic cursor overlay that follows the agent’s attention while a task is running.")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Spacer()
+
+                    Toggle("", isOn: $settingsStore.ghostCursorEnabled)
+                        .toggleStyle(.switch)
+                        .labelsHidden()
+                }
+
+                Divider()
+
+                HStack(spacing: 16) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Click sound")
+                            .font(.system(size: 13, weight: .semibold))
+                        Text("Optional soft feedback when the ghost cursor lands on click-like actions.")
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Spacer()
+
+                    Toggle("", isOn: $settingsStore.ghostCursorClickSoundEnabled)
+                        .toggleStyle(.switch)
+                        .labelsHidden()
+                        .disabled(!settingsStore.ghostCursorEnabled)
+                }
+
+                HStack(spacing: 16) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Debug labels")
+                            .font(.system(size: 13, weight: .semibold))
+                        Text("Show short labels under the ghost cursor for tuning and troubleshooting.")
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Spacer()
+
+                    Toggle("", isOn: $settingsStore.ghostCursorDebugLabelsEnabled)
+                        .toggleStyle(.switch)
+                        .labelsHidden()
+                        .disabled(!settingsStore.ghostCursorEnabled)
+                }
             }
         }
     }
