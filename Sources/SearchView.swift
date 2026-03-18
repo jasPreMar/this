@@ -218,6 +218,9 @@ struct PanelInputRow: View {
             .frame(width: expandsTextField ? nil : textWidth, height: textHeight)
             .frame(maxWidth: expandsTextField ? .infinity : nil, alignment: .leading)
 
+            VoiceTrailingIndicator(state: viewModel.voiceState, level: viewModel.voiceLevel)
+                .padding(.top, 1)
+
             if let manager = viewModel.claudeManager,
                manager.status == .streaming {
                 Button(action: {

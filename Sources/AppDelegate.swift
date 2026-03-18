@@ -69,6 +69,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     private var settingsWindow: NSWindow?
     private var commandKeyHeld = false
     private weak var commandKeyPanel: FloatingPanel?
+    private let commandMenuVoiceController = VoiceDictationController()
     private var updaterController: SPUStandardUpdaterController?
     private let onboardingSeenKey = "hasShownOnboarding"
     private var checkForUpdatesItem: NSMenuItem?
@@ -77,10 +78,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     private var feedbackPopover: NSPopover?
     private let soundPlayer = PTTSoundPlayer()
     private var taskRecordLookup: [ObjectIdentifier: TaskSessionRecord] = [:]
+    @Published var commandMenuVoiceState: SearchViewModel.VoiceState = .idle
+    @Published var commandMenuVoiceLevel: CGFloat = 0
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         sharedAppDelegate = self
         AppSettings.registerDefaults()
+        configureCommandMenuVoiceController()
         setupMainMenu()
         updaterController = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: self, userDriverDelegate: nil)
         setupStatusItem()
@@ -112,6 +116,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         let modifierFlags = event.modifierFlags
         let invokeKeyDown = InvokeHotKey.stored().isPressed(in: modifierFlags)
         if commandMenuPanel?.isVisible == true {
+            syncCommandMenuVoice(with: modifierFlags, invokeKeyDown: invokeKeyDown)
             if !invokeKeyDown {
                 commandKeyHeld = false
                 commandKeyPanel = nil
@@ -122,8 +127,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         if invokeKeyDown && !commandKeyHeld {
             commandKeyHeld = true
 
-            // Reuse an existing visible non-chat panel if one exists
-            if let existing = panels.first(where: {
+            if let selectedPanel = selectedVisiblePanel() {
+                commandKeyPanel = selectedPanel
+                selectedPanel.isCommandKeyHeld = true
+                selectedPanel.startAnchoredVoiceMode(with: modifierFlags)
+            } else if let existing = panels.first(where: {
                 $0.isVisible && !$0.searchViewModel.isChatMode
             }) {
                 commandKeyPanel = existing
@@ -143,7 +151,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             if let panel = commandKeyPanel {
                 panel.isCommandKeyHeld = false
                 panel.updateModifierFlags(modifierFlags)
-                panel.endCommandKeyMode()
+                panel.endInvokeHoldMode()
             }
             commandKeyPanel = nil
         }
@@ -720,6 +728,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     }
 
     func closeCommandMenu() {
+        commandMenuVoiceController.cancel()
+        commandMenuVoiceState = .idle
+        commandMenuVoiceLevel = 0
         tearDownCommandMenuEventMonitors()
         statusItem?.button?.highlight(false)
         commandMenuPanel?.orderOut(nil)
@@ -768,6 +779,103 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
                 return lhs.startedAt > rhs.startedAt
             }
             return lhs.lastActivityAt > rhs.lastActivityAt
+        }
+    }
+
+    private func selectedVisiblePanel() -> FloatingPanel? {
+        if let keyPanel = NSApp.keyWindow as? FloatingPanel, keyPanel.isVisible {
+            return keyPanel
+        }
+
+        if let mainPanel = NSApp.mainWindow as? FloatingPanel, mainPanel.isVisible {
+            return mainPanel
+        }
+
+        return nil
+    }
+
+    private func configureCommandMenuVoiceController() {
+        commandMenuVoiceController.onStateChange = { [weak self] state in
+            self?.handleCommandMenuVoiceStateChange(state)
+        }
+        commandMenuVoiceController.onLevelChange = { [weak self] level in
+            self?.commandMenuVoiceLevel = level
+        }
+        commandMenuVoiceController.onTranscript = { [weak self] transcript in
+            guard let self, self.commandMenuPanel?.isVisible == true else { return }
+            self.launchTaskFromCommandMenu(query: transcript)
+            self.closeCommandMenu()
+        }
+    }
+
+    private func syncCommandMenuVoice(with modifierFlags: NSEvent.ModifierFlags, invokeKeyDown: Bool) {
+        guard commandMenuPanel?.isVisible == true else {
+            cancelCommandMenuVoiceIfNeeded()
+            return
+        }
+
+        if invokeKeyDown {
+            guard AppSettings.autoVoiceEnabled || modifierFlags.contains(.shift) else {
+                cancelCommandMenuVoiceIfNeeded()
+                return
+            }
+
+            startCommandMenuVoiceIfNeeded()
+            return
+        }
+
+        stopCommandMenuVoiceIfNeeded()
+    }
+
+    private func startCommandMenuVoiceIfNeeded() {
+        guard commandMenuPanel?.isVisible == true else { return }
+
+        switch commandMenuVoiceState {
+        case .idle:
+            commandMenuVoiceController.start()
+        case .listening, .transcribing, .failed:
+            break
+        }
+    }
+
+    private func cancelCommandMenuVoiceIfNeeded() {
+        switch commandMenuVoiceState {
+        case .listening, .idle:
+            commandMenuVoiceController.cancel()
+        case .transcribing, .failed:
+            break
+        }
+    }
+
+    private func stopCommandMenuVoiceIfNeeded() {
+        switch commandMenuVoiceState {
+        case .listening:
+            commandMenuVoiceController.stop()
+        case .idle:
+            commandMenuVoiceController.cancel()
+        case .transcribing, .failed:
+            break
+        }
+    }
+
+    private func handleCommandMenuVoiceStateChange(_ state: VoiceDictationController.State) {
+        switch state {
+        case .idle:
+            commandMenuVoiceState = .idle
+            commandMenuVoiceLevel = 0
+        case .listening:
+            commandMenuVoiceState = .listening
+        case .transcribing:
+            commandMenuVoiceState = .transcribing
+            commandMenuVoiceLevel = 0
+        case .failed(let message):
+            commandMenuVoiceState = .failed(message)
+            commandMenuVoiceLevel = 0
+
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+                guard let self, self.commandMenuVoiceState == .failed(message) else { return }
+                self.commandMenuVoiceState = .idle
+            }
         }
     }
 
