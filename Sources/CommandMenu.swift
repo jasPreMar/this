@@ -130,6 +130,35 @@ struct CommandMenuView: View {
         return sortedTasks.first(where: { $0.id == selectedTaskID })
     }
 
+    private var trimmedQuery: String {
+        query.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var queryIsEmpty: Bool {
+        trimmedQuery.isEmpty
+    }
+
+    private var footerShortcuts: [CommandMenuShortcutItem] {
+        guard queryIsEmpty else {
+            return [
+                CommandMenuShortcutItem(label: "Run", keys: ["↩"])
+            ]
+        }
+
+        guard let selectedTask else { return [] }
+
+        var shortcuts = [
+            CommandMenuShortcutItem(label: "Open", keys: ["↩"])
+        ]
+
+        if selectedTask.isRunning {
+            shortcuts.append(CommandMenuShortcutItem(label: "Stop", keys: ["⌫"]))
+        }
+
+        shortcuts.append(CommandMenuShortcutItem(label: "Delete", keys: ["⌘", "⌫"]))
+        return shortcuts
+    }
+
     private var hasTasks: Bool {
         !sortedTasks.isEmpty
     }
@@ -280,9 +309,9 @@ struct CommandMenuView: View {
 
             Spacer(minLength: 16)
 
-            CommandMenuShortcut(label: "Open", keys: ["↩"], isEnabled: selectedTask != nil)
-            CommandMenuShortcut(label: "Stop", keys: ["⌫"], isEnabled: selectedTask?.isRunning == true)
-            CommandMenuShortcut(label: "Delete", keys: ["⌘", "⌫"], isEnabled: selectedTask != nil)
+            ForEach(footerShortcuts) { shortcut in
+                CommandMenuShortcut(label: shortcut.label, keys: shortcut.keys)
+            }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
@@ -295,20 +324,18 @@ struct CommandMenuView: View {
     }
 
     private func submitInput() {
-        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty {
+        if queryIsEmpty {
             openSelectedTask()
             return
         }
 
-        appDelegate.launchTaskFromCommandMenu(query: trimmed)
+        appDelegate.launchTaskFromCommandMenu(query: trimmedQuery)
         query = ""
         appDelegate.closeCommandMenu()
     }
 
     private func handleInputKeyDown(_ event: NSEvent) -> Bool {
         let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-        let queryIsEmpty = query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
 
         switch event.keyCode {
         case 125:
@@ -512,28 +539,36 @@ private struct TaskRuntimeStatusView: View {
 private struct CommandMenuShortcut: View {
     let label: String
     let keys: [String]
-    let isEnabled: Bool
 
     var body: some View {
         HStack(spacing: 8) {
             Text(label)
                 .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(isEnabled ? Color.primary : Color.secondary)
+                .foregroundStyle(Color.primary)
 
             HStack(spacing: 4) {
                 ForEach(keys, id: \.self) { key in
                     Text(key)
                         .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(isEnabled ? Color.secondary : Color.secondary.opacity(0.6))
+                        .foregroundStyle(Color.secondary)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 3)
                         .background(
                             RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                .fill(Color.black.opacity(isEnabled ? 0.08 : 0.04))
+                                .fill(Color.black.opacity(0.08))
                         )
                 }
             }
         }
+    }
+}
+
+private struct CommandMenuShortcutItem: Identifiable {
+    let label: String
+    let keys: [String]
+
+    var id: String {
+        "\(label)-\(keys.joined())"
     }
 }
 
