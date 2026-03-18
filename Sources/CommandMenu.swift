@@ -99,11 +99,22 @@ final class CommandMenuPanel: NSPanel {
 }
 
 struct CommandMenuView: View {
+    private static let panelWidth: CGFloat = 720
+    private static let maxPanelHeight: CGFloat = 520
+    private static let fallbackInputRowHeight: CGFloat = 54
+    private static let fallbackBottomBarHeight: CGFloat = 48
+    private static let dividerHeight: CGFloat = 1
+    private static let taskListVerticalPadding: CGFloat = 8
+    private static let estimatedTaskRowHeight: CGFloat = 46
+
     @ObservedObject var appDelegate: AppDelegate
     @State private var query = ""
     @State private var selectedTaskID: TaskSessionRecord.ID?
     @State private var textWidth: CGFloat = FocusedTextField.minWidth
     @State private var textHeight: CGFloat = 20
+    @State private var inputRowHeight: CGFloat = Self.fallbackInputRowHeight
+    @State private var bottomBarHeight: CGFloat = Self.fallbackBottomBarHeight
+    @State private var measuredTaskListContentHeight: CGFloat = 0
 
     private var sortedTasks: [TaskSessionRecord] {
         appDelegate.taskRecords.sorted { lhs, rhs in
@@ -119,18 +130,50 @@ struct CommandMenuView: View {
         return sortedTasks.first(where: { $0.id == selectedTaskID })
     }
 
+    private var hasTasks: Bool {
+        !sortedTasks.isEmpty
+    }
+
+    private var dividerCount: CGFloat {
+        hasTasks ? 2 : 1
+    }
+
+    private var estimatedTaskListHeight: CGFloat {
+        guard hasTasks else { return 0 }
+        return CGFloat(sortedTasks.count) * Self.estimatedTaskRowHeight + (Self.taskListVerticalPadding * 2)
+    }
+
+    private var taskListContentHeight: CGFloat {
+        measuredTaskListContentHeight > 0 ? measuredTaskListContentHeight : estimatedTaskListHeight
+    }
+
+    private var chromeHeight: CGFloat {
+        inputRowHeight + bottomBarHeight + (dividerCount * Self.dividerHeight)
+    }
+
+    private var maxTaskSectionHeight: CGFloat {
+        max(Self.maxPanelHeight - chromeHeight, 0)
+    }
+
+    private var taskSectionHeight: CGFloat {
+        guard hasTasks else { return 0 }
+        return min(taskListContentHeight, maxTaskSectionHeight)
+    }
+
+    private var panelHeight: CGFloat {
+        chromeHeight + taskSectionHeight
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             inputRow
 
             Divider()
 
-            ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(spacing: 0) {
-                        if sortedTasks.isEmpty {
-                            emptyState
-                        } else {
+            if hasTasks {
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVStack(spacing: 0) {
                             ForEach(sortedTasks) { task in
                                 CommandMenuTaskRow(
                                     task: task,
@@ -141,23 +184,29 @@ struct CommandMenuView: View {
                                 .id(task.id)
                             }
                         }
+                        .padding(.vertical, Self.taskListVerticalPadding)
+                        .reportHeight(CommandMenuTaskListContentHeightPreferenceKey.self)
                     }
-                    .padding(.vertical, 8)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .onChange(of: selectedTaskID) { _, selectedTaskID in
-                    guard let selectedTaskID else { return }
-                    withAnimation(.easeOut(duration: 0.12)) {
-                        proxy.scrollTo(selectedTaskID, anchor: .center)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: taskSectionHeight)
+                    .onPreferenceChange(CommandMenuTaskListContentHeightPreferenceKey.self) { height in
+                        guard height > 0 else { return }
+                        measuredTaskListContentHeight = height
+                    }
+                    .onChange(of: selectedTaskID) { _, selectedTaskID in
+                        guard let selectedTaskID else { return }
+                        withAnimation(.easeOut(duration: 0.12)) {
+                            proxy.scrollTo(selectedTaskID, anchor: .center)
+                        }
                     }
                 }
-            }
 
-            Divider()
+                Divider()
+            }
 
             bottomBar
         }
-        .frame(width: 720, height: 520)
+        .frame(width: Self.panelWidth, height: panelHeight)
         .background(.regularMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
         .overlay(
@@ -166,6 +215,7 @@ struct CommandMenuView: View {
         )
         .onAppear {
             selectFirstTaskIfNeeded()
+            syncPanelSize()
         }
         .onChange(of: sortedTasks.map(\.id)) { _, _ in
             if let selectedTaskID,
@@ -173,6 +223,9 @@ struct CommandMenuView: View {
                 return
             }
             selectFirstTaskIfNeeded()
+        }
+        .onChange(of: panelHeight) { _, _ in
+            syncPanelSize()
         }
     }
 
@@ -204,25 +257,11 @@ struct CommandMenuView: View {
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 16)
-    }
-
-    private var emptyState: some View {
-        VStack(alignment: .center, spacing: 10) {
-            Spacer(minLength: 40)
-            Image(systemName: "clock.arrow.circlepath")
-                .font(.system(size: 28))
-                .foregroundStyle(.secondary)
-            Text("No tasks yet")
-                .font(.system(size: 15, weight: .semibold))
-            Text("Run a task from the field above and it will stay here until you delete it.")
-                .font(.system(size: 13))
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 320)
-            Spacer(minLength: 40)
+        .reportHeight(CommandMenuInputRowHeightPreferenceKey.self)
+        .onPreferenceChange(CommandMenuInputRowHeightPreferenceKey.self) { height in
+            guard height > 0 else { return }
+            inputRowHeight = height
         }
-        .frame(maxWidth: .infinity)
-        .padding(.top, 36)
     }
 
     private var bottomBar: some View {
@@ -248,6 +287,11 @@ struct CommandMenuView: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
         .background(Color.black.opacity(0.035))
+        .reportHeight(CommandMenuBottomBarHeightPreferenceKey.self)
+        .onPreferenceChange(CommandMenuBottomBarHeightPreferenceKey.self) { height in
+            guard height > 0 else { return }
+            bottomBarHeight = height
+        }
     }
 
     private func submitInput() {
@@ -339,6 +383,10 @@ struct CommandMenuView: View {
 
     private func openSettings() {
         appDelegate.openSettingsFromCommandMenu()
+    }
+
+    private func syncPanelSize() {
+        appDelegate.updateCommandMenuSize(CGSize(width: Self.panelWidth, height: panelHeight))
     }
 }
 
@@ -486,5 +534,39 @@ private struct CommandMenuShortcut: View {
                 }
             }
         }
+    }
+}
+
+private struct CommandMenuInputRowHeightPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
+private struct CommandMenuBottomBarHeightPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
+private struct CommandMenuTaskListContentHeightPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
+private extension View {
+    func reportHeight<Key: PreferenceKey>(_ key: Key.Type) -> some View where Key.Value == CGFloat {
+        background(
+            GeometryReader { geometry in
+                Color.clear.preference(key: key, value: geometry.size.height)
+            }
+        )
     }
 }
