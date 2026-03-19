@@ -319,18 +319,11 @@ struct CommandMenuView: View {
 
     private var bottomBar: some View {
         HStack(spacing: 14) {
-            CommandMenuIconButton(
-                symbolName: "gearshape.fill",
-                popoverLabel: "Settings",
-                shortcutKeys: ["⌘", ","],
-                action: openSettings
-            )
-
-            CommandMenuIconButton(
-                symbolName: "bubble.left.fill",
-                popoverLabel: "Feedback",
-                shortcutKeys: ["⌘", "⇧", "F"],
-                action: openFeedback
+            SettingsMenuButton(
+                onCheckForUpdates: { appDelegate.checkForUpdatesFromCommandMenu() },
+                onLeaveFeedback: { openFeedback() },
+                onSettings: { openSettings() },
+                onQuit: { appDelegate.quitFromCommandMenu() }
             )
 
             Spacer(minLength: 16)
@@ -396,12 +389,27 @@ struct CommandMenuView: View {
                 stopSelectedTask()
                 return true
             }
-        case 3:
+        case 12: // Q
+            if hasCommand {
+                appDelegate.quitFromCommandMenu()
+                return true
+            }
+        case 37: // L
+            if hasCommand {
+                openFeedback()
+                return true
+            }
+        case 32: // U
+            if hasCommand {
+                appDelegate.checkForUpdatesFromCommandMenu()
+                return true
+            }
+        case 3: // F
             if hasCommand && hasShift {
                 openFeedback()
                 return true
             }
-        case 43:
+        case 43: // comma
             if hasCommand {
                 openSettings()
                 return true
@@ -752,52 +760,115 @@ private struct CommandMenuShortcutItem: Identifiable {
     }
 }
 
-private struct CommandMenuIconButton: View {
-    let symbolName: String
-    let popoverLabel: String
-    let shortcutKeys: [String]
-    let action: () -> Void
-    @State private var showsPopover = false
-    @State private var pendingPopoverWorkItem: DispatchWorkItem?
+private final class MenuActionHandler: NSObject {
+    var actions: [Int: () -> Void] = [:]
 
-    var body: some View {
-        Button(action: action) {
-            Image(systemName: symbolName)
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(.secondary)
-                .frame(width: 28, height: 28)
-                .background(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(Color.black.opacity(0.04))
-                )
-        }
-        .buttonStyle(.plain)
-        .onHover(perform: handleHover)
-        .popover(isPresented: $showsPopover, arrowEdge: .bottom) {
-            CommandMenuShortcut(label: popoverLabel, keys: shortcutKeys)
-                .padding(12)
-        }
-        .onDisappear {
-            pendingPopoverWorkItem?.cancel()
-            pendingPopoverWorkItem = nil
-            showsPopover = false
-        }
+    @objc func performAction(_ sender: NSMenuItem) {
+        actions[sender.tag]?()
+    }
+}
+
+private struct MenuAnchorRepresentable: NSViewRepresentable {
+    @Binding var anchorView: NSView?
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        DispatchQueue.main.async { anchorView = view }
+        return view
     }
 
-    private func handleHover(_ isHovering: Bool) {
-        pendingPopoverWorkItem?.cancel()
-        pendingPopoverWorkItem = nil
+    func updateNSView(_ nsView: NSView, context: Context) {}
+}
 
-        guard isHovering else {
-            showsPopover = false
-            return
+private struct SettingsMenuButton: View {
+    let onCheckForUpdates: () -> Void
+    let onLeaveFeedback: () -> Void
+    let onSettings: () -> Void
+    let onQuit: () -> Void
+
+    @State private var isHovering = false
+    @State private var anchorView: NSView?
+
+    var body: some View {
+        Button {
+            showMenu()
+        } label: {
+            Image(systemName: "gearshape.fill")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+        }
+        .buttonStyle(SettingsMenuButtonStyle(isHovering: isHovering))
+        .onHover { hovering in
+            isHovering = hovering
+            if hovering {
+                NSCursor.pointingHand.push()
+            } else {
+                NSCursor.pop()
+            }
+        }
+        .onDisappear {
+            if isHovering {
+                NSCursor.pop()
+                isHovering = false
+            }
+        }
+        .background(MenuAnchorRepresentable(anchorView: $anchorView))
+    }
+
+    private func showMenu() {
+        guard let anchorView else { return }
+
+        if isHovering {
+            NSCursor.pop()
+            isHovering = false
         }
 
-        let workItem = DispatchWorkItem {
-            showsPopover = true
+        let handler = MenuActionHandler()
+        objc_setAssociatedObject(anchorView, "menuHandler", handler, .OBJC_ASSOCIATION_RETAIN)
+
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+
+        let items: [(String, String, Int, () -> Void)] = [
+            ("Check for Updates", "u", 0, onCheckForUpdates),
+            ("Leave Feedback", "l", 1, onLeaveFeedback),
+            ("Settings", ",", 2, onSettings),
+        ]
+
+        for (title, keyEquiv, tag, action) in items {
+            let item = NSMenuItem(title: title, action: #selector(MenuActionHandler.performAction(_:)), keyEquivalent: keyEquiv)
+            item.tag = tag
+            item.target = handler
+            handler.actions[tag] = action
+            menu.addItem(item)
         }
-        pendingPopoverWorkItem = workItem
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12, execute: workItem)
+
+        menu.addItem(.separator())
+
+        let quitItem = NSMenuItem(title: "Quit HyperPointer", action: #selector(MenuActionHandler.performAction(_:)), keyEquivalent: "q")
+        quitItem.tag = 3
+        quitItem.target = handler
+        handler.actions[3] = onQuit
+        menu.addItem(quitItem)
+
+        let point = NSPoint(x: 0, y: anchorView.bounds.height + 4)
+        menu.popUp(positioning: nil, at: point, in: anchorView)
+    }
+}
+
+private struct SettingsMenuButtonStyle: ButtonStyle {
+    var isHovering: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .background(
+                Capsule(style: .continuous)
+                    .fill(Color.black.opacity(
+                        configuration.isPressed ? 0.14 : (isHovering ? 0.08 : 0)
+                    ))
+            )
     }
 }
 

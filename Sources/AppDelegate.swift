@@ -438,7 +438,19 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         openFeedbackPage(draft: draft)
     }
 
+    func checkForUpdatesFromCommandMenu() {
+        closeCommandMenu()
+        checkForUpdates()
+    }
+
+    func quitFromCommandMenu() {
+        closeCommandMenu()
+        NSApp.terminate(nil)
+    }
+
     private func showSettings() {
+        closeCommandMenu()
+
         if let settingsWindow {
             refreshApplicationPresentation()
             settingsWindow.makeKeyAndOrderFront(nil)
