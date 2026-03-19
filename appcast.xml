@@ -8,15 +8,15 @@
     <description>HyperPointer changelog</description>
     <language>en</language>
     <item>
-      <title>Version 1.0.69</title>
-      <sparkle:version>69</sparkle:version>
-      <sparkle:shortVersionString>1.0.69</sparkle:shortVersionString>
-      <pubDate>Wed, 18 Mar 2026 04:40:15 +0000</pubDate>
+      <title>Version 1.0.70</title>
+      <sparkle:version>70</sparkle:version>
+      <sparkle:shortVersionString>1.0.70</sparkle:shortVersionString>
+      <pubDate>Thu, 19 Mar 2026 01:51:58 +0000</pubDate>
       <enclosure
-        url="https://github.com/jasPreMar/hyper-pointer/releases/download/v1.0.69/HyperPointer.dmg"
-        length="2716807"
+        url="https://github.com/jasPreMar/hyper-pointer/releases/download/v1.0.70/HyperPointer.dmg"
+        length="2719875"
         type="application/octet-stream"
-        sparkle:edSignature="BS72f1FM+48nEltCoLaSoGehOppY52//6jbIB+3PmXkloL2C7zxvSjpY45pKBZktOeDL2RLMQUyttDhaY280Dg==" />
+        sparkle:edSignature="N14nSOvtzUpval1XBcltbN59eMDIFeRuhnTnXgMaPLhkxLJDdYhjb2NA/Wkwqv7YP4UiIz1pmKVkQjVjag7lAA==" />
     </item>
   </channel>
 </rss>
