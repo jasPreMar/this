@@ -447,10 +447,21 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     private func currentOnboardingInstallIdentifier() -> String {
         let bundleURL = Bundle.main.bundleURL.resolvingSymlinksInPath()
         if bundleURL.pathExtension == "app" {
-            return bundleURL.path
+            return installFingerprint(for: bundleURL)
         }
 
-        return (Bundle.main.executableURL ?? bundleURL).resolvingSymlinksInPath().path
+        let executableURL = (Bundle.main.executableURL ?? bundleURL).resolvingSymlinksInPath()
+        return installFingerprint(for: executableURL)
+    }
+
+    private func installFingerprint(for url: URL) -> String {
+        guard let resourceValues = try? url.resourceValues(forKeys: [.creationDateKey, .contentModificationDateKey]) else {
+            return url.path
+        }
+
+        let creationTimestamp = resourceValues.creationDate?.timeIntervalSinceReferenceDate ?? 0
+        let modificationTimestamp = resourceValues.contentModificationDate?.timeIntervalSinceReferenceDate ?? 0
+        return "\(url.path)#\(creationTimestamp)#\(modificationTimestamp)"
     }
 
     func openSettingsFromCommandMenu() {
