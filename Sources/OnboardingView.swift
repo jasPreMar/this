@@ -160,15 +160,14 @@ private struct PermissionsStep: View {
     var body: some View {
         OnboardingPageScaffold(
             title: "Grant permissions",
-            subtitle: "These macOS permissions let HyperPointer automate apps and capture context on this Mac."
+            subtitle: "These macOS permissions let HyperPointer capture context and access the system services you enable on this Mac."
         ) {
-            VStack(alignment: .leading, spacing: 14) {
-                VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 0) {
                 PermissionStatusRow(
                     title: "Accessibility",
                     description: "Control UI elements and inspect what is under your pointer.",
                     icon: "hand.raised",
-                    state: permissionState(
+                    state: settingsReviewState(
                         isGranted: viewModel.isAccessibilityGranted,
                         isBusy: viewModel.isAccessibilityRequestInFlight
                     ) {
@@ -185,12 +184,12 @@ private struct PermissionsStep: View {
                     title: "Screen Recording",
                     description: "Capture the visible window for context and screenshots.",
                     icon: "display",
-                    state: permissionState(
+                    state: settingsReviewState(
                         isGranted: viewModel.isScreenRecordingGranted,
                         isBusy: viewModel.isScreenRecordingRequestInFlight
                     ) {
                         if !viewModel.isScreenRecordingGranted {
-                            viewModel.requestScreenRecording()
+                            viewModel.requestScreenRecording(resumeDestination: .onboarding)
                         }
                     }
                 )
@@ -207,7 +206,7 @@ private struct PermissionsStep: View {
                         isBusy: viewModel.isMicrophoneRequestInFlight
                     ) {
                         if !viewModel.isMicrophoneGranted {
-                            viewModel.requestMicrophone()
+                            viewModel.requestMicrophone(resumeDestination: .onboarding)
                         }
                     }
                 )
@@ -224,7 +223,7 @@ private struct PermissionsStep: View {
                         isBusy: viewModel.isSpeechRecognitionRequestInFlight
                     ) {
                         if !viewModel.isSpeechRecognitionGranted {
-                            viewModel.requestSpeechRecognition()
+                            viewModel.requestSpeechRecognition(resumeDestination: .onboarding)
                         }
                     }
                 )
@@ -233,16 +232,98 @@ private struct PermissionsStep: View {
                     .padding(.leading, 64)
 
                 PermissionStatusRow(
-                    title: "Automation",
-                    description: "Allow HyperPointer to control other apps via AppleScript.",
-                    icon: "bolt.horizontal.circle",
-                    state: .action("Grant") {
-                        viewModel.openAutomationSettings()
+                    title: "Calendars",
+                    description: "Allow HyperPointer to read or create calendar events when needed.",
+                    icon: "calendar",
+                    state: permissionState(
+                        isGranted: viewModel.isCalendarsGranted,
+                        isBusy: viewModel.isCalendarsRequestInFlight
+                    ) {
+                        if !viewModel.isCalendarsGranted {
+                            viewModel.requestCalendars(resumeDestination: .onboarding)
+                        }
                     }
                 )
-                }
-                .cardStyle()
+
+                Divider()
+                    .padding(.leading, 64)
+
+                PermissionStatusRow(
+                    title: "Contacts",
+                    description: "Allow contact lookup and people-related assistance when needed.",
+                    icon: "person.2",
+                    state: permissionState(
+                        isGranted: viewModel.isContactsGranted,
+                        isBusy: viewModel.isContactsRequestInFlight
+                    ) {
+                        if !viewModel.isContactsGranted {
+                            viewModel.requestContacts(resumeDestination: .onboarding)
+                        }
+                    }
+                )
+
+                Divider()
+                    .padding(.leading, 64)
+
+                PermissionStatusRow(
+                    title: "Full Disk Access",
+                    description: "Allow access to protected files and folders when tasks require it.",
+                    icon: "externaldrive.badge.shield.half.filled",
+                    state: .action("Grant") {
+                        viewModel.openFullDiskAccessSettings()
+                    }
+                )
+
+                Divider()
+                    .padding(.leading, 64)
+
+                PermissionStatusRow(
+                    title: "Reminders",
+                    description: "Allow HyperPointer to read or create reminders when needed.",
+                    icon: "checklist",
+                    state: permissionState(
+                        isGranted: viewModel.isRemindersGranted,
+                        isBusy: viewModel.isRemindersRequestInFlight
+                    ) {
+                        if !viewModel.isRemindersGranted {
+                            viewModel.requestReminders(resumeDestination: .onboarding)
+                        }
+                    }
+                )
+
+                Divider()
+                    .padding(.leading, 64)
+
+                PermissionStatusRow(
+                    title: "App Management",
+                    description: "Allow HyperPointer to manage other apps through macOS controls when needed.",
+                    icon: "square.stack.3d.up",
+                    state: .action("Grant") {
+                        viewModel.openAppManagementSettings()
+                    }
+                )
+
+                Divider()
+                    .padding(.leading, 64)
+
+                PermissionStatusRow(
+                    title: "Input Monitoring",
+                    description: "Allow HyperPointer to observe input events outside the app when needed.",
+                    icon: "keyboard",
+                    state: permissionState(
+                        isGranted: viewModel.isInputMonitoringGranted,
+                        isBusy: viewModel.isInputMonitoringRequestInFlight
+                    ) {
+                        if !viewModel.isInputMonitoringGranted {
+                            viewModel.requestInputMonitoring(resumeDestination: .onboarding)
+                        }
+                    }
+                )
             }
+            .cardStyle()
+        }
+        .onAppear {
+            viewModel.refreshWithSettling()
         }
     }
 
@@ -254,7 +335,21 @@ private struct PermissionsStep: View {
         if isGranted {
             return .granted("Granted")
         }
-        if isBusy || viewModel.isPreparingAppBundle {
+        if isBusy {
+            return .inProgress
+        }
+        return .action("Grant", action)
+    }
+
+    private func settingsReviewState(
+        isGranted: Bool,
+        isBusy: Bool,
+        action: @escaping () -> Void
+    ) -> PermissionStatusRow.State {
+        if isGranted {
+            return .granted("Granted")
+        }
+        if isBusy {
             return .inProgress
         }
         return .action("Grant", action)

@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 
-private enum SettingsSection: String, CaseIterable, Identifiable {
+enum SettingsSection: String, CaseIterable, Identifiable {
     case general
     case chat
     case permissions
@@ -50,10 +50,12 @@ struct SettingsView: View {
     private let onLeaveFeedback: () -> Void
 
     init(
+        initialSection: SettingsSection = .general,
         onAccessibilityStateChange: @escaping (Bool) -> Void,
         onCheckForUpdates: @escaping () -> Void,
         onLeaveFeedback: @escaping () -> Void
     ) {
+        _selectedSection = State(initialValue: initialSection)
         _onboardingViewModel = StateObject(
             wrappedValue: OnboardingViewModel(
                 onFinish: {},
@@ -362,7 +364,7 @@ private struct PermissionsSettingsPane: View {
     var body: some View {
         SettingsPageScaffold(
             title: "Permissions",
-            subtitle: "These macOS permissions let HyperPointer automate apps, capture context, and support voice input on this Mac."
+            subtitle: "These macOS permissions let HyperPointer capture context, support voice input, and access the system services you enable on this Mac."
         ) {
             SettingsCard(padding: 0) {
                 VStack(alignment: .leading, spacing: 0) {
@@ -370,7 +372,7 @@ private struct PermissionsSettingsPane: View {
                         title: "Accessibility",
                         description: "Control UI elements and inspect what is under your pointer.",
                         icon: "hand.raised",
-                        state: permissionState(
+                        state: settingsReviewState(
                             isGranted: viewModel.isAccessibilityGranted,
                             isBusy: viewModel.isAccessibilityRequestInFlight
                         ) {
@@ -386,12 +388,12 @@ private struct PermissionsSettingsPane: View {
                         title: "Screen Recording",
                         description: "Capture the visible window for context and screenshots.",
                         icon: "display",
-                        state: permissionState(
+                        state: settingsReviewState(
                             isGranted: viewModel.isScreenRecordingGranted,
                             isBusy: viewModel.isScreenRecordingRequestInFlight
                         ) {
                             if !viewModel.isScreenRecordingGranted {
-                                viewModel.requestScreenRecording()
+                                viewModel.requestScreenRecording(resumeDestination: .settingsPermissions)
                             }
                         }
                     )
@@ -407,7 +409,7 @@ private struct PermissionsSettingsPane: View {
                             isBusy: viewModel.isMicrophoneRequestInFlight
                         ) {
                             if !viewModel.isMicrophoneGranted {
-                                viewModel.requestMicrophone()
+                                viewModel.requestMicrophone(resumeDestination: .settingsPermissions)
                             }
                         }
                     )
@@ -423,7 +425,7 @@ private struct PermissionsSettingsPane: View {
                             isBusy: viewModel.isSpeechRecognitionRequestInFlight
                         ) {
                             if !viewModel.isSpeechRecognitionGranted {
-                                viewModel.requestSpeechRecognition()
+                                viewModel.requestSpeechRecognition(resumeDestination: .settingsPermissions)
                             }
                         }
                     )
@@ -431,15 +433,93 @@ private struct PermissionsSettingsPane: View {
                     divider
 
                     SettingsPermissionStatusRow(
-                        title: "Automation",
-                        description: "Allow HyperPointer to control other apps via AppleScript.",
-                        icon: "bolt.horizontal.circle",
+                        title: "Calendars",
+                        description: "Allow HyperPointer to read or create calendar events when needed.",
+                        icon: "calendar",
+                        state: permissionState(
+                            isGranted: viewModel.isCalendarsGranted,
+                            isBusy: viewModel.isCalendarsRequestInFlight
+                        ) {
+                            if !viewModel.isCalendarsGranted {
+                                viewModel.requestCalendars(resumeDestination: .settingsPermissions)
+                            }
+                        }
+                    )
+
+                    divider
+
+                    SettingsPermissionStatusRow(
+                        title: "Contacts",
+                        description: "Allow contact lookup and people-related assistance when needed.",
+                        icon: "person.2",
+                        state: permissionState(
+                            isGranted: viewModel.isContactsGranted,
+                            isBusy: viewModel.isContactsRequestInFlight
+                        ) {
+                            if !viewModel.isContactsGranted {
+                                viewModel.requestContacts(resumeDestination: .settingsPermissions)
+                            }
+                        }
+                    )
+
+                    divider
+
+                    SettingsPermissionStatusRow(
+                        title: "Full Disk Access",
+                        description: "Allow access to protected files and folders when tasks require it.",
+                        icon: "externaldrive.badge.shield.half.filled",
                         state: .action("Grant") {
-                            viewModel.openAutomationSettings()
+                            viewModel.openFullDiskAccessSettings()
+                        }
+                    )
+
+                    divider
+
+                    SettingsPermissionStatusRow(
+                        title: "Reminders",
+                        description: "Allow HyperPointer to read or create reminders when needed.",
+                        icon: "checklist",
+                        state: permissionState(
+                            isGranted: viewModel.isRemindersGranted,
+                            isBusy: viewModel.isRemindersRequestInFlight
+                        ) {
+                            if !viewModel.isRemindersGranted {
+                                viewModel.requestReminders(resumeDestination: .settingsPermissions)
+                            }
+                        }
+                    )
+
+                    divider
+
+                    SettingsPermissionStatusRow(
+                        title: "App Management",
+                        description: "Allow HyperPointer to manage other apps through macOS controls when needed.",
+                        icon: "square.stack.3d.up",
+                        state: .action("Grant") {
+                            viewModel.openAppManagementSettings()
+                        }
+                    )
+
+                    divider
+
+                    SettingsPermissionStatusRow(
+                        title: "Input Monitoring",
+                        description: "Allow HyperPointer to observe input events outside the app when needed.",
+                        icon: "keyboard",
+                        state: permissionState(
+                            isGranted: viewModel.isInputMonitoringGranted,
+                            isBusy: viewModel.isInputMonitoringRequestInFlight
+                        ) {
+                            if !viewModel.isInputMonitoringGranted {
+                                viewModel.requestInputMonitoring(resumeDestination: .settingsPermissions)
+                            }
                         }
                     )
                 }
             }
+        }
+        .onAppear {
+            viewModel.refreshWithSettling()
         }
     }
 
@@ -456,7 +536,21 @@ private struct PermissionsSettingsPane: View {
         if isGranted {
             return .granted("Granted")
         }
-        if isBusy || viewModel.isPreparingAppBundle {
+        if isBusy {
+            return .inProgress
+        }
+        return .action("Grant", action)
+    }
+
+    private func settingsReviewState(
+        isGranted: Bool,
+        isBusy: Bool,
+        action: @escaping () -> Void
+    ) -> SettingsPermissionStatusRow.State {
+        if isGranted {
+            return .granted("Granted")
+        }
+        if isBusy {
             return .inProgress
         }
         return .action("Grant", action)

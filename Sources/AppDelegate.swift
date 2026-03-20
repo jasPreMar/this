@@ -73,6 +73,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     private let commandMenuVoiceController = VoiceDictationController()
     private var updaterController: SPUStandardUpdaterController?
     private let onboardingSeenKey = "hasShownOnboarding"
+    private let onboardingSeenInstallKey = "hasShownOnboardingInstallID"
     private var checkForUpdatesItem: NSMenuItem?
     private var updateDot: NSView?
     private var updateCheckTimer: Timer?
@@ -372,13 +373,18 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     }
 
     private func showOnboardingIfNeeded() {
-        if OnboardingViewModel.shouldResumeOnLaunch {
-            showOnboarding(force: true)
+        if let resumeDestination = OnboardingViewModel.resumeDestinationOnLaunch {
+            switch resumeDestination {
+            case .onboarding:
+                showOnboarding(force: true)
+            case .settingsPermissions:
+                showSettings(initialSection: .permissions)
+            }
             OnboardingViewModel.clearResumeOnLaunch()
             return
         }
 
-        if !UserDefaults.standard.bool(forKey: onboardingSeenKey) {
+        if !hasSeenOnboardingForCurrentInstall() {
             showOnboarding()
         }
     }
@@ -391,7 +397,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             return
         }
 
-        if !force && UserDefaults.standard.bool(forKey: onboardingSeenKey) {
+        if !force && hasSeenOnboardingForCurrentInstall() {
             return
         }
 
@@ -399,6 +405,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             onFinish: { [weak self] in
                 guard let self else { return }
                 UserDefaults.standard.set(true, forKey: self.onboardingSeenKey)
+                UserDefaults.standard.set(self.currentOnboardingInstallIdentifier(), forKey: self.onboardingSeenInstallKey)
                 self.closeOnboarding()
             },
             onAccessibilityStateChange: { [weak self] isGranted in
@@ -430,6 +437,35 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         refreshApplicationPresentation()
     }
 
+    private func hasSeenOnboardingForCurrentInstall() -> Bool {
+        let defaults = UserDefaults.standard
+        let installIdentifier = currentOnboardingInstallIdentifier()
+
+        if defaults.string(forKey: onboardingSeenInstallKey) == installIdentifier {
+            return true
+        }
+
+        guard defaults.bool(forKey: onboardingSeenKey) else {
+            return false
+        }
+
+        guard OnboardingViewModel.coreRequirementsReadyForCurrentSystem else {
+            return false
+        }
+
+        defaults.set(installIdentifier, forKey: onboardingSeenInstallKey)
+        return true
+    }
+
+    private func currentOnboardingInstallIdentifier() -> String {
+        let bundleURL = Bundle.main.bundleURL.resolvingSymlinksInPath()
+        if bundleURL.pathExtension == "app" {
+            return bundleURL.path
+        }
+
+        return (Bundle.main.executableURL ?? bundleURL).resolvingSymlinksInPath().path
+    }
+
     func openSettingsFromCommandMenu() {
         closeCommandMenu()
         showSettings()
@@ -450,9 +486,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         NSApp.terminate(nil)
     }
 
-    private func showSettings() {
+    private func showSettings(initialSection: SettingsSection = .general) {
         closeCommandMenu()
-
         if let settingsWindow {
             refreshApplicationPresentation()
             settingsWindow.makeKeyAndOrderFront(nil)
@@ -472,6 +507,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         window.center()
         window.contentView = NSHostingView(
             rootView: SettingsView(
+                initialSection: initialSection,
                 onAccessibilityStateChange: { [weak self] isGranted in
                     self?.updateAccessibilityMonitoring(isGranted: isGranted)
                 },

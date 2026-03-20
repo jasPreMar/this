@@ -1,5 +1,4 @@
 BINARY    := .build/debug/HyperPointer
-CERT_NAME := HyperPointer Dev
 BUNDLE_ID := com.hyperpointer.app
 USER_TCC  := $(HOME)/Library/Application Support/com.apple.TCC/TCC.db
 APP_PATH  := dist/HyperPointer.app
@@ -13,30 +12,21 @@ build:
 	@BIN_DIR=$$(swift build --show-bin-path 2>/dev/null) && cp Sources/Resources/*.wav "$$BIN_DIR/" 2>/dev/null || true
 	@$(MAKE) --no-print-directory sign
 
-# Sign with stable identity if cert exists; otherwise skip silently.
-# TCC grants written by `sudo make grant` use NULL csreq and persist via bundle ID alone.
 sign:
-	@if security find-identity -v -p codesigning 2>/dev/null | grep -q "$(CERT_NAME)"; then \
-		codesign --force --sign "$(CERT_NAME)" --timestamp=none "$(BINARY)" && \
-		echo "Signed with '$(CERT_NAME)'."; \
+	@IDENTITY="$$(./scripts/detect-signing-identity.sh 2>/dev/null || true)"; \
+	if [ -n "$$IDENTITY" ]; then \
+		codesign --force --sign "$$IDENTITY" --timestamp=none "$(BINARY)" && \
+		echo "Signed with '$$IDENTITY'."; \
 	fi
 
 run: build
 	"$(BINARY)"
 
 app:
-	@if security find-identity -v -p codesigning 2>/dev/null | grep -q "$(CERT_NAME)"; then \
-		./scripts/build-app.sh --sign-mode identity --sign-identity "$(CERT_NAME)"; \
-	else \
-		./scripts/build-app.sh; \
-	fi
+	./scripts/build-app.sh
 
 install:
-	@if security find-identity -v -p codesigning 2>/dev/null | grep -q "$(CERT_NAME)"; then \
-		./scripts/build-app.sh --install --sign-mode identity --sign-identity "$(CERT_NAME)"; \
-	else \
-		./scripts/build-app.sh --install; \
-	fi
+	./scripts/build-app.sh --install
 
 dmg:
 	./scripts/build-dmg.sh
@@ -48,7 +38,7 @@ cert-instructions:
 	@echo ""
 	@echo "  1. Open Keychain Access"
 	@echo "  2. Menu: Keychain Access → Certificate Assistant → Create a Certificate"
-	@echo "  3. Name: $(CERT_NAME)"
+	@echo "  3. Name: HyperPointer Local Development"
 	@echo "  4. Identity Type: Self Signed Root"
 	@echo "  5. Certificate Type: Code Signing"
 	@echo "  6. Click Create"

@@ -6,6 +6,9 @@ APP_NAME="HyperPointer"
 IDENTITY_NAME="HyperPointer Local Development"
 KEYCHAIN_PATH="$HOME/Library/Keychains/login.keychain-db"
 RUN_AFTER_BUILD=0
+OUTPUT_DIR="${DEV_APP_OUTPUT_DIR:-$ROOT_DIR/dist/debug}"
+BUILD_CONFIGURATION="${BUILD_CONFIGURATION:-debug}"
+SIGNING_HELPER="$ROOT_DIR/scripts/detect-signing-identity.sh"
 
 if [[ "${1:-}" == "--run" ]]; then
   RUN_AFTER_BUILD=1
@@ -71,55 +74,26 @@ EOF
   rm -rf "$tmpdir"
 }
 
-cd "$ROOT_DIR"
-swift build
-
-if ! identity_exists; then
-  echo "Creating local code-signing identity: $IDENTITY_NAME"
-  create_local_identity
+if ! "$SIGNING_HELPER" >/dev/null 2>&1; then
+  if ! identity_exists; then
+    echo "Creating local code-signing identity: $IDENTITY_NAME"
+    create_local_identity
+  fi
 fi
 
-if ! identity_exists; then
-  echo "Failed to create a usable code-signing identity." >&2
+if ! "$SIGNING_HELPER" >/dev/null 2>&1; then
+  echo "Failed to create or detect a usable code-signing identity." >&2
   exit 1
 fi
 
-BIN_DIR="$(swift build --show-bin-path)"
-BINARY_PATH="$BIN_DIR/$APP_NAME"
-APP_PATH="$ROOT_DIR/.build/$APP_NAME.app"
-CONTENTS_PATH="$APP_PATH/Contents"
-MACOS_PATH="$CONTENTS_PATH/MacOS"
-RESOURCES_PATH="$CONTENTS_PATH/Resources"
-
-rm -rf "$APP_PATH"
-mkdir -p "$MACOS_PATH" "$RESOURCES_PATH"
-cp "$BINARY_PATH" "$MACOS_PATH/$APP_NAME"
-cp "$ROOT_DIR/Sources/Info.plist" "$CONTENTS_PATH/Info.plist"
-cp "$ROOT_DIR/Sources/Resources"/*.wav "$RESOURCES_PATH/"
-
-RESOURCE_BUNDLE="$(find "$BIN_DIR" -maxdepth 1 -name "${APP_NAME}_*.bundle" -type d 2>/dev/null | head -1)"
-if [[ -n "$RESOURCE_BUNDLE" ]]; then
-  cp -R "$RESOURCE_BUNDLE" "$RESOURCES_PATH/"
-fi
-
-# Embed Sparkle.framework so the packaged app can launch from the dev bundle.
-SPARKLE_FRAMEWORK="$(find "$ROOT_DIR/.build/artifacts" -name "Sparkle.framework" -type d 2>/dev/null | head -1)"
-if [[ -n "$SPARKLE_FRAMEWORK" ]]; then
-  FRAMEWORKS_PATH="$CONTENTS_PATH/Frameworks"
-  mkdir -p "$FRAMEWORKS_PATH"
-  rm -rf "$FRAMEWORKS_PATH/Sparkle.framework"
-  cp -R "$SPARKLE_FRAMEWORK" "$FRAMEWORKS_PATH/"
-fi
-
-codesign \
-  --force \
-  --deep \
-  --sign "$IDENTITY_NAME" \
-  --timestamp=none \
-  "$APP_PATH"
-
-echo "Built app bundle: $APP_PATH"
+build_args=(
+  --configuration "$BUILD_CONFIGURATION"
+  --output-dir "$OUTPUT_DIR"
+  --sign-mode auto
+)
 
 if [[ "$RUN_AFTER_BUILD" -eq 1 ]]; then
-  open "$APP_PATH"
+  build_args+=(--run)
 fi
+
+"$ROOT_DIR/scripts/build-app.sh" "${build_args[@]}"

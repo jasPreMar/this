@@ -9,7 +9,8 @@ APP_PATH="$DIST_DIR/$APP_NAME.app"
 INSTALL_AFTER_BUILD=0
 RUN_AFTER_BUILD=0
 SIGN_IDENTITY="${SIGN_IDENTITY:-}"
-SIGN_MODE="ad-hoc"
+SIGN_MODE="${SIGN_MODE:-auto}"
+SIGNING_HELPER="$ROOT_DIR/scripts/detect-signing-identity.sh"
 
 usage() {
   cat <<EOF
@@ -21,8 +22,8 @@ Options:
   --install                        Copy the built app into /Applications
   --run                            Open the built app after packaging
   --sign-identity <identity>       macOS signing identity to use
-  --sign-mode <ad-hoc|identity|skip>
-                                   Signing mode (default: ad-hoc)
+  --sign-mode <auto|ad-hoc|identity|skip>
+                                   Signing mode (default: auto)
 EOF
 }
 
@@ -66,7 +67,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 case "$SIGN_MODE" in
-  ad-hoc|identity|skip)
+  auto|ad-hoc|identity|skip)
     ;;
   *)
     echo "Unsupported sign mode: $SIGN_MODE" >&2
@@ -74,9 +75,42 @@ case "$SIGN_MODE" in
     ;;
 esac
 
-if [[ "$SIGN_MODE" == "identity" && -z "$SIGN_IDENTITY" ]]; then
-  echo "--sign-mode identity requires --sign-identity." >&2
-  exit 1
+resolve_signing_configuration() {
+  local detected_identity=""
+
+  if [[ -z "$SIGN_IDENTITY" && -x "$SIGNING_HELPER" ]]; then
+    detected_identity="$("$SIGNING_HELPER" 2>/dev/null || true)"
+  fi
+
+  case "$SIGN_MODE" in
+    auto)
+      if [[ -n "$SIGN_IDENTITY" ]]; then
+        SIGN_MODE="identity"
+      elif [[ -n "$detected_identity" ]]; then
+        SIGN_MODE="identity"
+        SIGN_IDENTITY="$detected_identity"
+      else
+        SIGN_MODE="ad-hoc"
+      fi
+      ;;
+    identity)
+      if [[ -z "$SIGN_IDENTITY" && -n "$detected_identity" ]]; then
+        SIGN_IDENTITY="$detected_identity"
+      fi
+      if [[ -z "$SIGN_IDENTITY" ]]; then
+        echo "--sign-mode identity requires --sign-identity or a detectable signing identity." >&2
+        exit 1
+      fi
+      ;;
+  esac
+}
+
+resolve_signing_configuration
+
+if [[ "$SIGN_MODE" == "identity" ]]; then
+  echo "Using signing identity: $SIGN_IDENTITY"
+else
+  echo "Using signing mode: $SIGN_MODE"
 fi
 
 cd "$ROOT_DIR"
@@ -145,5 +179,9 @@ if [[ "$INSTALL_AFTER_BUILD" -eq 1 ]]; then
 fi
 
 if [[ "$RUN_AFTER_BUILD" -eq 1 ]]; then
-  open "$APP_PATH"
+  RUN_PATH="$APP_PATH"
+  if [[ "$INSTALL_AFTER_BUILD" -eq 1 ]]; then
+    RUN_PATH="$TARGET_PATH"
+  fi
+  open -na "$RUN_PATH"
 fi

@@ -1,6 +1,8 @@
 import AppKit
 import AVFoundation
 import Carbon
+import Contacts
+import EventKit
 import Speech
 
 enum ClaudeSetupChoice {
@@ -8,10 +10,19 @@ enum ClaudeSetupChoice {
     case later
 }
 
+enum PermissionResumeDestination: String {
+    case onboarding
+    case settingsPermissions
+}
+
 private enum PendingPermissionRequest: String {
     case screenRecording
     case microphone
     case speechRecognition
+    case contacts
+    case calendars
+    case reminders
+    case inputMonitoring
 }
 
 final class OnboardingViewModel: ObservableObject {
@@ -19,6 +30,7 @@ final class OnboardingViewModel: ObservableObject {
     let soundPlayer = PTTSoundPlayer()
     private static let lastStepIndex = 3
     private static let resumeOnLaunchKey = "resumeOnboardingOnLaunch"
+    private static let resumeDestinationKey = "resumeOnboardingDestination"
     private static let pendingPermissionRequestKey = "pendingPermissionRequest"
     private static let accessibilityPromptKey = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
 
@@ -43,16 +55,26 @@ final class OnboardingViewModel: ObservableObject {
     @Published var isScreenRecordingGranted = false
     @Published var microphoneStatus: AVAuthorizationStatus = .notDetermined
     @Published var speechStatus: SFSpeechRecognizerAuthorizationStatus = .notDetermined
+    @Published var contactsStatus: CNAuthorizationStatus = .notDetermined
+    @Published var calendarsStatus: EKAuthorizationStatus = .notDetermined
+    @Published var remindersStatus: EKAuthorizationStatus = .notDetermined
+    @Published var isInputMonitoringGranted = false
     @Published var claudeSetupChoice: ClaudeSetupChoice = .thisMac
     @Published private(set) var isAccessibilityRequestInFlight = false
     @Published private(set) var isScreenRecordingRequestInFlight = false
     @Published private(set) var isMicrophoneRequestInFlight = false
     @Published private(set) var isSpeechRecognitionRequestInFlight = false
+    @Published private(set) var isContactsRequestInFlight = false
+    @Published private(set) var isCalendarsRequestInFlight = false
+    @Published private(set) var isRemindersRequestInFlight = false
+    @Published private(set) var isInputMonitoringRequestInFlight = false
     @Published private(set) var isPreparingAppBundle = false
 
     private let onFinish: () -> Void
     private let onAccessibilityStateChange: (Bool) -> Void
+    private let eventStore = EKEventStore()
     private var permissionPollTimer: Timer?
+    private var deferredPermissionRefreshes: [DispatchWorkItem] = []
     private var appObservers: [NSObjectProtocol] = []
     private var isRefreshingPermissionState = false
     private var appBundlePreparationProcess: Process?
@@ -63,18 +85,25 @@ final class OnboardingViewModel: ObservableObject {
     ) {
         self.onFinish = onFinish
         self.onAccessibilityStateChange = onAccessibilityStateChange
-        refresh()
+        refreshWithSettling()
         startObservingSystemState()
         resumePendingPermissionRequestIfNeeded()
     }
 
     deinit {
         permissionPollTimer?.invalidate()
+        deferredPermissionRefreshes.forEach { $0.cancel() }
         appObservers.forEach { NotificationCenter.default.removeObserver($0) }
     }
 
     var coreRequirementsReady: Bool {
         isClaudeInstalled && isAccessibilityGranted && isScreenRecordingGranted
+    }
+
+    static var coreRequirementsReadyForCurrentSystem: Bool {
+        resolveClaudeBinaryPath() != nil
+            && currentAccessibilityGrantedForSystem()
+            && CGPreflightScreenCaptureAccess()
     }
 
     var isMicrophoneGranted: Bool {
@@ -85,6 +114,32 @@ final class OnboardingViewModel: ObservableObject {
         speechStatus == .authorized
     }
 
+    var isContactsGranted: Bool {
+        contactsStatus == .authorized
+    }
+
+    var isCalendarsGranted: Bool {
+        switch calendarsStatus {
+        case .authorized, .fullAccess, .writeOnly:
+            return true
+        case .notDetermined, .denied, .restricted:
+            return false
+        @unknown default:
+            return false
+        }
+    }
+
+    var isRemindersGranted: Bool {
+        switch remindersStatus {
+        case .authorized, .fullAccess, .writeOnly:
+            return true
+        case .notDetermined, .denied, .restricted:
+            return false
+        @unknown default:
+            return false
+        }
+    }
+
     var isRunningFromAppBundle: Bool {
         Bundle.main.bundleURL.pathExtension == "app"
     }
@@ -92,6 +147,11 @@ final class OnboardingViewModel: ObservableObject {
     func refresh() {
         refreshStaticState()
         refreshPermissionState()
+    }
+
+    func refreshWithSettling() {
+        refresh()
+        scheduleDeferredPermissionRefreshes()
     }
 
     func finish() {
@@ -122,11 +182,11 @@ final class OnboardingViewModel: ObservableObject {
         }
     }
 
-    func requestScreenRecording() {
+    func requestScreenRecording(resumeDestination: PermissionResumeDestination = .onboarding) {
         guard !isScreenRecordingRequestInFlight else { return }
-        if prepareAppBundleForSensitivePermissionIfNeeded(.screenRecording) { return }
+        if prepareAppBundleForSensitivePermissionIfNeeded(.screenRecording, resumeDestination: resumeDestination) { return }
         isScreenRecordingRequestInFlight = true
-        OnboardingViewModel.markResumeOnLaunch()
+        OnboardingViewModel.markResumeOnLaunch(destination: resumeDestination)
         NSApp.activate(ignoringOtherApps: true)
 
         DispatchQueue.global(qos: .userInitiated).async {
@@ -143,9 +203,9 @@ final class OnboardingViewModel: ObservableObject {
         }
     }
 
-    func requestMicrophone() {
+    func requestMicrophone(resumeDestination: PermissionResumeDestination = .onboarding) {
         guard !isMicrophoneRequestInFlight else { return }
-        if prepareAppBundleForSensitivePermissionIfNeeded(.microphone) { return }
+        if prepareAppBundleForSensitivePermissionIfNeeded(.microphone, resumeDestination: resumeDestination) { return }
 
         switch AVCaptureDevice.authorizationStatus(for: .audio) {
         case .authorized:
@@ -171,9 +231,9 @@ final class OnboardingViewModel: ObservableObject {
         }
     }
 
-    func requestSpeechRecognition() {
+    func requestSpeechRecognition(resumeDestination: PermissionResumeDestination = .onboarding) {
         guard !isSpeechRecognitionRequestInFlight else { return }
-        if prepareAppBundleForSensitivePermissionIfNeeded(.speechRecognition) { return }
+        if prepareAppBundleForSensitivePermissionIfNeeded(.speechRecognition, resumeDestination: resumeDestination) { return }
 
         switch SFSpeechRecognizer.authorizationStatus() {
         case .authorized:
@@ -199,6 +259,127 @@ final class OnboardingViewModel: ObservableObject {
         }
     }
 
+    func requestContacts(resumeDestination: PermissionResumeDestination = .onboarding) {
+        guard !isContactsRequestInFlight else { return }
+        if prepareAppBundleForSensitivePermissionIfNeeded(.contacts, resumeDestination: resumeDestination) { return }
+
+        switch CNContactStore.authorizationStatus(for: .contacts) {
+        case .authorized:
+            refreshPermissionState()
+            return
+        case .denied, .restricted:
+            openContactsSettings()
+            return
+        case .notDetermined:
+            break
+        @unknown default:
+            break
+        }
+
+        isContactsRequestInFlight = true
+        NSApp.activate(ignoringOtherApps: true)
+
+        CNContactStore().requestAccess(for: .contacts) { _, _ in
+            DispatchQueue.main.async {
+                self.isContactsRequestInFlight = false
+                self.refreshPermissionState()
+            }
+        }
+    }
+
+    func requestCalendars(resumeDestination: PermissionResumeDestination = .onboarding) {
+        guard !isCalendarsRequestInFlight else { return }
+        if prepareAppBundleForSensitivePermissionIfNeeded(.calendars, resumeDestination: resumeDestination) { return }
+
+        switch EKEventStore.authorizationStatus(for: .event) {
+        case .authorized, .fullAccess, .writeOnly:
+            refreshPermissionState()
+            return
+        case .denied, .restricted:
+            openCalendarsSettings()
+            return
+        case .notDetermined:
+            break
+        @unknown default:
+            break
+        }
+
+        isCalendarsRequestInFlight = true
+        NSApp.activate(ignoringOtherApps: true)
+
+        eventStore.requestFullAccessToEvents { _, _ in
+            DispatchQueue.main.async {
+                self.isCalendarsRequestInFlight = false
+                self.refreshPermissionState()
+            }
+        }
+    }
+
+    func requestReminders(resumeDestination: PermissionResumeDestination = .onboarding) {
+        guard !isRemindersRequestInFlight else { return }
+        if prepareAppBundleForSensitivePermissionIfNeeded(.reminders, resumeDestination: resumeDestination) { return }
+
+        switch EKEventStore.authorizationStatus(for: .reminder) {
+        case .authorized, .fullAccess, .writeOnly:
+            refreshPermissionState()
+            return
+        case .denied, .restricted:
+            openRemindersSettings()
+            return
+        case .notDetermined:
+            break
+        @unknown default:
+            break
+        }
+
+        isRemindersRequestInFlight = true
+        NSApp.activate(ignoringOtherApps: true)
+
+        eventStore.requestFullAccessToReminders { _, _ in
+            DispatchQueue.main.async {
+                self.isRemindersRequestInFlight = false
+                self.refreshPermissionState()
+            }
+        }
+    }
+
+    func requestInputMonitoring(resumeDestination: PermissionResumeDestination = .onboarding) {
+        guard !isInputMonitoringRequestInFlight else { return }
+        if prepareAppBundleForSensitivePermissionIfNeeded(.inputMonitoring, resumeDestination: resumeDestination) { return }
+
+        if #available(macOS 10.15, *) {
+            if CGPreflightListenEventAccess() {
+                refreshPermissionState()
+                return
+            }
+        } else {
+            refreshPermissionState()
+            return
+        }
+
+        isInputMonitoringRequestInFlight = true
+        OnboardingViewModel.markResumeOnLaunch(destination: resumeDestination)
+        NSApp.activate(ignoringOtherApps: true)
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            let granted: Bool
+            if #available(macOS 10.15, *) {
+                granted = CGRequestListenEventAccess()
+            } else {
+                granted = true
+            }
+
+            DispatchQueue.main.async {
+                self.isInputMonitoringRequestInFlight = false
+                self.refreshPermissionState()
+
+                if !granted && !self.isInputMonitoringGranted {
+                    self.openInputMonitoringSettings()
+                }
+            }
+        }
+    }
+
     func openAccessibilitySettings() {
         openSettings(anchor: "Privacy_Accessibility")
     }
@@ -207,16 +388,36 @@ final class OnboardingViewModel: ObservableObject {
         openSettings(anchor: "Privacy_ScreenCapture")
     }
 
-    func openAutomationSettings() {
-        openSettings(anchor: "Privacy_Automation")
-    }
-
     func openMicrophoneSettings() {
         openSettings(anchor: "Privacy_Microphone")
     }
 
     func openSpeechSettings() {
         openSettings(anchor: "Privacy_SpeechRecognition")
+    }
+
+    func openCalendarsSettings() {
+        openSettings(anchor: "Privacy_Calendars")
+    }
+
+    func openContactsSettings() {
+        openSettings(anchor: "Privacy_Contacts")
+    }
+
+    func openFullDiskAccessSettings() {
+        openSettings(anchor: "Privacy_AllFiles")
+    }
+
+    func openRemindersSettings() {
+        openSettings(anchor: "Privacy_Reminders")
+    }
+
+    func openAppManagementSettings() {
+        openSettings(anchor: "Privacy_AppBundles")
+    }
+
+    func openInputMonitoringSettings() {
+        openSettings(anchor: "Privacy_ListenEvent")
     }
 
     func openClaudeInstallGuide() {
@@ -229,15 +430,20 @@ final class OnboardingViewModel: ObservableObject {
         openClaudeInstallGuide()
     }
 
-    private func prepareAppBundleAndRelaunch(pendingPermission: PendingPermissionRequest? = nil) {
+    private func prepareAppBundleAndRelaunch(
+        pendingPermission: PendingPermissionRequest? = nil,
+        resumeDestination: PermissionResumeDestination
+    ) {
         guard !isPreparingAppBundle else { return }
 
         if let pendingPermission {
             OnboardingViewModel.storePendingPermissionRequest(pendingPermission)
         }
+        OnboardingViewModel.markResumeOnLaunch(destination: resumeDestination)
 
         guard let workspaceRoot = resolveWorkspaceRoot() else {
             OnboardingViewModel.clearPendingPermissionRequest()
+            OnboardingViewModel.clearResumeOnLaunch()
             showAppBundlePreparationFailure(
                 message: "Could not locate the package root needed to build HyperPointer.app."
             )
@@ -247,6 +453,7 @@ final class OnboardingViewModel: ObservableObject {
         let scriptURL = workspaceRoot.appendingPathComponent("scripts/dev-app.sh")
         guard FileManager.default.isExecutableFile(atPath: scriptURL.path) else {
             OnboardingViewModel.clearPendingPermissionRequest()
+            OnboardingViewModel.clearResumeOnLaunch()
             showAppBundlePreparationFailure(
                 message: "Missing executable packaging script at \(scriptURL.path)."
             )
@@ -272,6 +479,7 @@ final class OnboardingViewModel: ObservableObject {
 
                 guard finishedProcess.terminationStatus == 0 else {
                     OnboardingViewModel.clearPendingPermissionRequest()
+                    OnboardingViewModel.clearResumeOnLaunch()
                     self.showAppBundlePreparationFailure(
                         message: output.isEmpty ? "Building HyperPointer.app failed." : output
                     )
@@ -292,6 +500,7 @@ final class OnboardingViewModel: ObservableObject {
             appBundlePreparationProcess = nil
             isPreparingAppBundle = false
             OnboardingViewModel.clearPendingPermissionRequest()
+            OnboardingViewModel.clearResumeOnLaunch()
             showAppBundlePreparationFailure(message: error.localizedDescription)
         }
     }
@@ -308,6 +517,14 @@ final class OnboardingViewModel: ObservableObject {
         update(\.isScreenRecordingGranted, to: CGPreflightScreenCaptureAccess())
         update(\.microphoneStatus, to: AVCaptureDevice.authorizationStatus(for: .audio))
         update(\.speechStatus, to: SFSpeechRecognizer.authorizationStatus())
+        update(\.contactsStatus, to: CNContactStore.authorizationStatus(for: .contacts))
+        update(\.calendarsStatus, to: EKEventStore.authorizationStatus(for: .event))
+        update(\.remindersStatus, to: EKEventStore.authorizationStatus(for: .reminder))
+        if #available(macOS 10.15, *) {
+            update(\.isInputMonitoringGranted, to: CGPreflightListenEventAccess())
+        } else {
+            update(\.isInputMonitoringGranted, to: true)
+        }
 
         if previousAccessibilityGranted != newAccessibilityGranted {
             onAccessibilityStateChange(newAccessibilityGranted)
@@ -328,11 +545,23 @@ final class OnboardingViewModel: ObservableObject {
                 object: nil,
                 queue: .main
             ) { [weak self] _ in
-                self?.refreshStaticState()
-                self?.refreshPermissionState()
+                self?.refreshWithSettling()
             }
         ]
 
+    }
+
+    private func scheduleDeferredPermissionRefreshes() {
+        deferredPermissionRefreshes.forEach { $0.cancel() }
+        deferredPermissionRefreshes.removeAll()
+
+        for delay in [0.25, 0.75, 1.5, 3.0] {
+            let workItem = DispatchWorkItem { [weak self] in
+                self?.refreshPermissionState()
+            }
+            deferredPermissionRefreshes.append(workItem)
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: workItem)
+        }
     }
 
     private func refreshStaticState() {
@@ -353,20 +582,35 @@ final class OnboardingViewModel: ObservableObject {
         return max(0, min(storedStep, lastStepIndex))
     }
 
-    static var shouldResumeOnLaunch: Bool {
-        UserDefaults.standard.bool(forKey: resumeOnLaunchKey)
+    static var resumeDestinationOnLaunch: PermissionResumeDestination? {
+        guard UserDefaults.standard.bool(forKey: resumeOnLaunchKey) else {
+            return nil
+        }
+
+        guard let rawValue = UserDefaults.standard.string(forKey: resumeDestinationKey),
+              let destination = PermissionResumeDestination(rawValue: rawValue) else {
+            return .onboarding
+        }
+
+        return destination
     }
 
     static func clearResumeOnLaunch() {
         UserDefaults.standard.removeObject(forKey: resumeOnLaunchKey)
+        UserDefaults.standard.removeObject(forKey: resumeDestinationKey)
     }
 
-    private static func markResumeOnLaunch() {
+    private static func markResumeOnLaunch(destination: PermissionResumeDestination) {
         UserDefaults.standard.set(true, forKey: resumeOnLaunchKey)
+        UserDefaults.standard.set(destination.rawValue, forKey: resumeDestinationKey)
     }
 
     private func currentAccessibilityGranted() -> Bool {
-        let options = [OnboardingViewModel.accessibilityPromptKey: false] as CFDictionary
+        Self.currentAccessibilityGrantedForSystem()
+    }
+
+    private static func currentAccessibilityGrantedForSystem() -> Bool {
+        let options = [accessibilityPromptKey: false] as CFDictionary
         return AXIsProcessTrustedWithOptions(options)
     }
 
@@ -414,9 +658,15 @@ final class OnboardingViewModel: ObservableObject {
     }
 
     @discardableResult
-    private func prepareAppBundleForSensitivePermissionIfNeeded(_ permission: PendingPermissionRequest) -> Bool {
+    private func prepareAppBundleForSensitivePermissionIfNeeded(
+        _ permission: PendingPermissionRequest,
+        resumeDestination: PermissionResumeDestination
+    ) -> Bool {
         guard !isRunningFromAppBundle else { return false }
-        prepareAppBundleAndRelaunch(pendingPermission: permission)
+        prepareAppBundleAndRelaunch(
+            pendingPermission: permission,
+            resumeDestination: resumeDestination
+        )
         return true
     }
 
@@ -434,6 +684,14 @@ final class OnboardingViewModel: ObservableObject {
                 self.requestMicrophone()
             case .speechRecognition:
                 self.requestSpeechRecognition()
+            case .contacts:
+                self.requestContacts()
+            case .calendars:
+                self.requestCalendars()
+            case .reminders:
+                self.requestReminders()
+            case .inputMonitoring:
+                self.requestInputMonitoring()
             }
         }
     }

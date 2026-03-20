@@ -9,7 +9,7 @@ APP_PATH="$DIST_DIR/$APP_NAME.app"
 DMG_PATH="$DIST_DIR/$APP_NAME.dmg"
 VOLUME_NAME="${DMG_VOLUME_NAME:-$APP_NAME}"
 SIGN_IDENTITY="${SIGN_IDENTITY:-}"
-SIGN_MODE="${SIGN_MODE:-ad-hoc}"
+SIGN_MODE="${SIGN_MODE:-auto}"
 TEMP_DIR="$(mktemp -d)"
 STAGING_DIR="$TEMP_DIR/staging"
 RW_DMG_PATH="$TEMP_DIR/$APP_NAME-rw.dmg"
@@ -28,7 +28,7 @@ Options:
   --output-dir <path>              Artifact directory (default: ./dist)
   --volume-name <name>             Mounted DMG volume name (default: HyperPointer)
   --sign-identity <identity>       macOS signing identity to use for the app build
-  --sign-mode <ad-hoc|identity|skip>
+  --sign-mode <auto|ad-hoc|identity|skip>
                                    Signing mode passed through to build-app.sh
 EOF
 }

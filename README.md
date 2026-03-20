@@ -76,6 +76,12 @@ make build
 ./.build/debug/HyperPointer
 ```
 
+For permission testing, prefer launching the packaged app bundle instead of the raw binary so macOS sees a stable app path and signing identity:
+
+```bash
+./scripts/dev-app.sh --run
+```
+
 To package it as a normal macOS app bundle:
 
 ```bash
@@ -121,7 +127,7 @@ sudo make grant
 
 This writes the grants directly to the TCC database so no popups ever appear.
 
-The `.app` and `.dmg` targets default to ad-hoc signing so they work cleanly on the local machine. If you want a distributable artifact for other Macs, pass a real Developer ID identity and notarize the result:
+The `.app` and `.dmg` targets now auto-prefer the best available signing identity in your keychain, starting with `Developer ID Application`, then local development identities. If no stable identity is available they fall back to ad-hoc signing. For a distributable artifact on other Macs, use your real Developer ID identity and notarize the result:
 
 ```bash
 SIGN_MODE=identity SIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)" make dmg
