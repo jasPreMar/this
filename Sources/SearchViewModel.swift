@@ -43,7 +43,7 @@ class SearchViewModel: ObservableObject {
     private let staleThreshold = 3
 
     /// Set by FloatingPanel
-    var onSubmit: ((String, URL?, URL?) -> Void)?
+    var onSubmit: ((String, URL?) -> Void)?
     var onClose: (() -> Void)?
     var onMessageSent: (() -> Void)?
     var onStreamingComplete: (() -> Void)?
@@ -87,8 +87,7 @@ class SearchViewModel: ObservableObject {
         } else {
             // First message — switch to chat mode
             let context = buildContextMessage()
-            let (screenshotURL, _) = captureHoveredWindowScreenshot()
-            onSubmit?(context, screenshotURL, hoveredWorkingDirectoryURL)
+            onSubmit?(context, hoveredWorkingDirectoryURL)
         }
     }
 

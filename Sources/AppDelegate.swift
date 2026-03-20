@@ -67,6 +67,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     private var commandMenuLocalMouseMonitor: Any?
     private var onboardingWindow: NSWindow?
     private var settingsWindow: NSWindow?
+    private var panelsPendingCommandMenuReveal: Set<ObjectIdentifier> = []
     private var commandKeyHeld = false
     private weak var commandKeyPanel: FloatingPanel?
     private let commandMenuVoiceController = VoiceDictationController()
@@ -82,6 +83,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     @Published var commandMenuVoiceState: SearchViewModel.VoiceState = .idle
     @Published var commandMenuVoiceLevel: CGFloat = 0
     @Published var commandMenuChatRecord: TaskSessionRecord?
+    private var rememberedCommandMenuChatRecordID: TaskSessionRecord.ID?
     private lazy var ghostCursorStore = GhostCursorStore(playClickSound: { [weak self] in
         self?.soundPlayer.playGhostCursorClick()
     })
@@ -474,7 +476,18 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         openFeedbackPage(draft: draft)
     }
 
+    func checkForUpdatesFromCommandMenu() {
+        closeCommandMenu()
+        checkForUpdates()
+    }
+
+    func quitFromCommandMenu() {
+        closeCommandMenu()
+        NSApp.terminate(nil)
+    }
+
     private func showSettings(initialSection: SettingsSection = .general) {
+        closeCommandMenu()
         if let settingsWindow {
             refreshApplicationPresentation()
             settingsWindow.makeKeyAndOrderFront(nil)
@@ -523,7 +536,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     }
 
     private func showCommandMenu(from source: CommandMenuPresentationSource, navigateToChat: TaskSessionRecord? = nil) {
-        commandMenuChatRecord = navigateToChat
+        setCommandMenuChatRecord(resolvedCommandMenuChatRecord(preferred: navigateToChat))
 
         if commandMenuPanel == nil {
             let panel = CommandMenuPanel(
@@ -534,7 +547,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             )
             panel.isFloatingPanel = true
             panel.hidesOnDeactivate = false
-            panel.level = .statusBar
+            panel.level = .floating
             panel.isOpaque = false
             panel.backgroundColor = .clear
             panel.hasShadow = true
@@ -736,12 +749,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             self?.openFeedbackPage()
         }
         panel.onMessageSent = { [weak self, weak panel] in
-            if UserDefaults.standard.bool(forKey: "chimeEnabled") {
-                self?.soundPlayer.playPress()
-            }
             guard let self, let panel else { return }
             self.ghostCursorStore.registerTask(panel.taskId, anchorPoint: panel.ghostCursorAnchorPoint)
             self.ghostCursorStore.setTaskVisible(panel.taskId, visible: false)
+        }
+        panel.onStreamingBegan = { [weak self] in
+            if UserDefaults.standard.bool(forKey: "chimeEnabled") {
+                self?.soundPlayer.playPress()
+            }
         }
         panel.onStreamingComplete = { [weak self, weak panel] in
             if UserDefaults.standard.bool(forKey: "chimeEnabled") {
@@ -749,6 +764,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             }
             guard let self, let panel else { return }
             self.ghostCursorStore.setTaskVisible(panel.taskId, visible: false)
+            self.presentCompletedTaskInCommandMenuIfNeeded(for: panel)
         }
         panel.onPersistentTaskStarted = { [weak self, weak panel] _ in
             guard let self, let panel else { return }
@@ -763,6 +779,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             if !panel.isTaskRunning {
                 self.ghostCursorStore.setTaskVisible(panel.taskId, visible: false)
             }
+            self.presentCompletedTaskInCommandMenuIfNeeded(for: panel)
         }
         panel.onPanelDestroyed = { [weak self, weak panel] _ in
             guard let self, let panel else { return }
@@ -772,9 +789,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         panel.onTransitionToCommandMenu = { [weak self, weak panel] _ in
             guard let self, let panel else { return }
             panel.dismiss(restorePreviousFocus: false)
-            let key = ObjectIdentifier(panel)
-            guard let record = self.taskRecordLookup[key] else { return }
-            self.showCommandMenu(from: .invokeHotKey, navigateToChat: record)
+            self.scheduleCommandMenuReveal(for: panel)
         }
         panel.onGhostCursorIntent = { [weak self, weak panel] intent in
             guard let self, let panel else { return }
@@ -802,6 +817,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     @discardableResult
     func launchTaskFromCommandMenu(query: String) -> TaskSessionRecord? {
         let panel = makePanel()
+        scheduleCommandMenuReveal(for: panel)
+        closeCommandMenu()
         panels.append(panel)
         panel.startTaskFromMenuHeadless(query: query)
         let key = ObjectIdentifier(panel)
@@ -810,7 +827,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
 
     func openTaskRecord(_ record: TaskSessionRecord) {
         ensureTaskHasLivePanel(record)
-        commandMenuChatRecord = record
+        setCommandMenuChatRecord(record)
     }
 
     func stopTaskRecord(_ record: TaskSessionRecord) {
@@ -824,6 +841,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     }
 
     func deleteTaskRecord(_ record: TaskSessionRecord) {
+        if rememberedCommandMenuChatRecordID == record.id {
+            clearCommandMenuChatRecord()
+        }
+
         // Delete persisted session from disk
         if let persistedId = record.persistedSessionId {
             ChatSessionStore.shared.delete(id: persistedId)
@@ -842,6 +863,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     }
 
     func closeCommandMenu() {
+        if let commandMenuChatRecord {
+            rememberedCommandMenuChatRecordID = commandMenuChatRecord.id
+        }
         commandMenuChatRecord = nil
         commandMenuVoiceController.cancel()
         commandMenuVoiceState = .idle
@@ -851,13 +875,17 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         commandMenuPanel?.orderOut(nil)
     }
 
+    func handleCommandMenuBackNavigation() {
+        clearCommandMenuChatRecord()
+    }
+
     func handleCommandMenuEscape() {
         if let chatRecord = commandMenuChatRecord {
             if let manager = chatRecord.panel?.searchViewModel.claudeManager,
                manager.status == .waiting || manager.status == .streaming {
                 manager.stop()
             } else {
-                commandMenuChatRecord = nil
+                clearCommandMenuChatRecord()
             }
         } else {
             closeCommandMenu()
@@ -924,6 +952,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         panels.removeAll { $0 === panel }
 
         let key = ObjectIdentifier(panel)
+        panelsPendingCommandMenuReveal.remove(key)
         if let record = taskRecordLookup.removeValue(forKey: key) {
             // Keep the record in the list if it has a persisted session on disk
             if let persistedId = panel.persistedSessionId {
@@ -954,6 +983,47 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             }
             return lhs.lastActivityAt > rhs.lastActivityAt
         }
+    }
+
+    private func scheduleCommandMenuReveal(for panel: FloatingPanel) {
+        let key = ObjectIdentifier(panel)
+        panelsPendingCommandMenuReveal.insert(key)
+        presentCompletedTaskInCommandMenuIfNeeded(for: panel)
+    }
+
+    private func presentCompletedTaskInCommandMenuIfNeeded(for panel: FloatingPanel) {
+        let key = ObjectIdentifier(panel)
+        guard panelsPendingCommandMenuReveal.contains(key),
+              panel.taskCompletedAt != nil,
+              let record = taskRecordLookup[key] else { return }
+
+        panelsPendingCommandMenuReveal.remove(key)
+        showCommandMenu(from: .invokeHotKey, navigateToChat: record)
+    }
+
+    private func setCommandMenuChatRecord(_ record: TaskSessionRecord?) {
+        commandMenuChatRecord = record
+        rememberedCommandMenuChatRecordID = record?.id
+    }
+
+    private func clearCommandMenuChatRecord() {
+        commandMenuChatRecord = nil
+        rememberedCommandMenuChatRecordID = nil
+    }
+
+    private func resolvedCommandMenuChatRecord(preferred record: TaskSessionRecord?) -> TaskSessionRecord? {
+        if let record {
+            ensureTaskHasLivePanel(record)
+            return record
+        }
+
+        guard let rememberedID = rememberedCommandMenuChatRecordID,
+              let rememberedRecord = taskRecords.first(where: { $0.id == rememberedID }) else {
+            return nil
+        }
+
+        ensureTaskHasLivePanel(rememberedRecord)
+        return rememberedRecord
     }
 
     private func selectedVisiblePanel() -> FloatingPanel? {
@@ -1045,7 +1115,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         commandMenuVoiceController.onTranscript = { [weak self] transcript in
             guard let self, self.commandMenuPanel?.isVisible == true else { return }
             self.launchTaskFromCommandMenu(query: transcript)
-            self.closeCommandMenu()
         }
     }
 

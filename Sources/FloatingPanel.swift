@@ -180,6 +180,7 @@ class FloatingPanel: NSPanel {
     var onCommandKeyDropped: (() -> Void)?
     var onFeedbackShake: (() -> Void)?
     var onMessageSent: (() -> Void)?
+    var onStreamingBegan: (() -> Void)?
     var onStreamingComplete: (() -> Void)?
     var onPersistentTaskStarted: ((FloatingPanel) -> Void)?
     var onTaskStateChanged: ((FloatingPanel) -> Void)?
@@ -249,9 +250,11 @@ class FloatingPanel: NSPanel {
         contentView = hostingView
 
         // Wire up the submit callback
-        searchViewModel.onSubmit = { [weak self] context, screenshotURL, workingDirectoryURL in
+        searchViewModel.onSubmit = { [weak self] context, workingDirectoryURL in
             guard let self else { return }
             if self.onTransitionToCommandMenu != nil {
+                orderOut(nil)
+                let (screenshotURL, _) = searchViewModel.captureHoveredWindowScreenshot()
                 self.startHeadless(
                     message: context,
                     screenshotURL: screenshotURL,
@@ -259,6 +262,7 @@ class FloatingPanel: NSPanel {
                 )
                 self.onTransitionToCommandMenu?(self)
             } else {
+                let (screenshotURL, _) = searchViewModel.captureHoveredWindowScreenshot()
                 self.transitionToTerminal(
                     message: context,
                     screenshotURL: screenshotURL,
@@ -665,9 +669,13 @@ class FloatingPanel: NSPanel {
         guard preservesTaskHistory else { return }
 
         switch status {
-        case .waiting, .streaming:
+        case .waiting:
             taskCompletedAt = nil
             taskLastActivityAt = Date()
+        case .streaming:
+            taskCompletedAt = nil
+            taskLastActivityAt = Date()
+            onStreamingBegan?()
         case .done, .error:
             let now = Date()
             taskCompletedAt = now
