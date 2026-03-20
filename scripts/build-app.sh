@@ -3,9 +3,11 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 APP_NAME="HyperPointer"
+SCRIPT_NAME="$(basename "$0")"
 CONFIGURATION="${BUILD_CONFIGURATION:-release}"
 DIST_DIR="${DIST_DIR:-$ROOT_DIR/dist}"
 APP_PATH="$DIST_DIR/$APP_NAME.app"
+ENTITLEMENTS_PATH="$ROOT_DIR/config/macos/distribution.entitlements"
 INSTALL_AFTER_BUILD=0
 RUN_AFTER_BUILD=0
 SIGN_IDENTITY="${SIGN_IDENTITY:-}"
@@ -14,7 +16,7 @@ SIGNING_HELPER="$ROOT_DIR/scripts/detect-signing-identity.sh"
 
 usage() {
   cat <<EOF
-Usage: $(basename "$0") [options]
+Usage: $SCRIPT_NAME [options]
 
 Options:
   --configuration <debug|release>  Build configuration (default: release)
@@ -22,7 +24,7 @@ Options:
   --install                        Copy the built app into /Applications
   --run                            Open the built app after packaging
   --sign-identity <identity>       macOS signing identity to use
-  --sign-mode <auto|ad-hoc|identity|skip>
+  --sign-mode <auto|ad-hoc|identity|developer-id|skip>
                                    Signing mode (default: auto)
 EOF
 }
@@ -67,13 +69,17 @@ while [[ $# -gt 0 ]]; do
 done
 
 case "$SIGN_MODE" in
-  auto|ad-hoc|identity|skip)
+  auto|ad-hoc|identity|developer-id|skip)
     ;;
   *)
     echo "Unsupported sign mode: $SIGN_MODE" >&2
     exit 1
     ;;
 esac
+
+is_developer_id_identity() {
+  [[ "$1" == Developer\ ID\ Application:* ]]
+}
 
 resolve_signing_configuration() {
   local detected_identity=""
@@ -85,10 +91,18 @@ resolve_signing_configuration() {
   case "$SIGN_MODE" in
     auto)
       if [[ -n "$SIGN_IDENTITY" ]]; then
-        SIGN_MODE="identity"
+        if is_developer_id_identity "$SIGN_IDENTITY"; then
+          SIGN_MODE="developer-id"
+        else
+          SIGN_MODE="identity"
+        fi
       elif [[ -n "$detected_identity" ]]; then
-        SIGN_MODE="identity"
         SIGN_IDENTITY="$detected_identity"
+        if is_developer_id_identity "$SIGN_IDENTITY"; then
+          SIGN_MODE="developer-id"
+        else
+          SIGN_MODE="identity"
+        fi
       else
         SIGN_MODE="ad-hoc"
       fi
@@ -102,6 +116,23 @@ resolve_signing_configuration() {
         exit 1
       fi
       ;;
+    developer-id)
+      if [[ -z "$SIGN_IDENTITY" && -n "$detected_identity" ]]; then
+        SIGN_IDENTITY="$detected_identity"
+      fi
+      if [[ -z "$SIGN_IDENTITY" ]]; then
+        echo "--sign-mode developer-id requires --sign-identity or a detectable signing identity." >&2
+        exit 1
+      fi
+      if ! is_developer_id_identity "$SIGN_IDENTITY"; then
+        echo "--sign-mode developer-id requires a 'Developer ID Application:' certificate." >&2
+        exit 1
+      fi
+      if [[ ! -f "$ENTITLEMENTS_PATH" ]]; then
+        echo "Missing entitlements file: $ENTITLEMENTS_PATH" >&2
+        exit 1
+      fi
+      ;;
   esac
 }
 
@@ -109,6 +140,8 @@ resolve_signing_configuration
 
 if [[ "$SIGN_MODE" == "identity" ]]; then
   echo "Using signing identity: $SIGN_IDENTITY"
+elif [[ "$SIGN_MODE" == "developer-id" ]]; then
+  echo "Using Developer ID signing identity: $SIGN_IDENTITY"
 else
   echo "Using signing mode: $SIGN_MODE"
 fi
@@ -147,25 +180,58 @@ if [[ "$SIGN_MODE" != "skip" ]]; then
 
   if [[ "$SIGN_MODE" == "identity" ]]; then
     SIGN_ARG="$SIGN_IDENTITY"
+  elif [[ "$SIGN_MODE" == "developer-id" ]]; then
+    SIGN_ARG="$SIGN_IDENTITY"
   else
     SIGN_ARG="-"
   fi
 
-  # Sign nested components before the app bundle
-  if [[ -d "$CONTENTS_PATH/Frameworks/Sparkle.framework" ]]; then
-    # Sign XPC services inside Sparkle
-    find "$CONTENTS_PATH/Frameworks/Sparkle.framework" -name "*.xpc" -type d | while read xpc; do
-      codesign --force --sign "$SIGN_ARG" --timestamp=none "$xpc"
-    done
-    codesign --force --sign "$SIGN_ARG" --timestamp=none "$CONTENTS_PATH/Frameworks/Sparkle.framework"
+  codesign_args=(--force --sign "$SIGN_ARG")
+  if [[ "$SIGN_MODE" == "developer-id" ]]; then
+    codesign_args+=(--options runtime --timestamp)
+  else
+    codesign_args+=(--timestamp=none)
   fi
 
-  codesign \
-    --force \
-    --deep \
-    --sign "$SIGN_ARG" \
-    --timestamp=none \
-    "$APP_PATH"
+  sign_component() {
+    local target_path="$1"
+    local preserve_entitlements="${2:-0}"
+    local sign_args=("${codesign_args[@]}")
+
+    if [[ "$preserve_entitlements" -eq 1 ]]; then
+      sign_args+=(--preserve-metadata=entitlements)
+    fi
+
+    codesign "${sign_args[@]}" "$target_path"
+  }
+
+  # Sign nested components before the app bundle. Sparkle's XPC services need
+  # explicit signing and should not rely on `codesign --deep`.
+  if [[ -d "$CONTENTS_PATH/Frameworks/Sparkle.framework" ]]; then
+    find "$CONTENTS_PATH/Frameworks/Sparkle.framework" -path '*/XPCServices/*.xpc' -type d | sort | while IFS= read -r xpc; do
+      if [[ "$xpc" == *"/Downloader.xpc" ]]; then
+        sign_component "$xpc" 1
+      else
+        sign_component "$xpc"
+      fi
+    done
+
+    if [[ -f "$CONTENTS_PATH/Frameworks/Sparkle.framework/Versions/B/Autoupdate" ]]; then
+      sign_component "$CONTENTS_PATH/Frameworks/Sparkle.framework/Versions/B/Autoupdate"
+    fi
+
+    if [[ -d "$CONTENTS_PATH/Frameworks/Sparkle.framework/Versions/B/Updater.app" ]]; then
+      sign_component "$CONTENTS_PATH/Frameworks/Sparkle.framework/Versions/B/Updater.app"
+    fi
+
+    sign_component "$CONTENTS_PATH/Frameworks/Sparkle.framework"
+  fi
+
+  app_codesign_args=("${codesign_args[@]}")
+  if [[ "$SIGN_MODE" == "developer-id" ]]; then
+    app_codesign_args+=(--entitlements "$ENTITLEMENTS_PATH")
+  fi
+  codesign "${app_codesign_args[@]}" "$APP_PATH"
 fi
 
 echo "Built app bundle: $APP_PATH"

@@ -1,6 +1,6 @@
 #!/bin/zsh
 # One-time setup: create a self-signed code-signing certificate and export it
-# so CI can import it for stable signing.
+# so local builds can keep a stable signature across updates.
 #
 # Usage: ./scripts/create-signing-cert.sh [cert-name]
 #   cert-name defaults to "HyperPointer"
@@ -15,7 +15,8 @@
 #   Every Sparkle update changes the binary, so the hash changes, and macOS
 #   re-prompts for all permissions. A stable self-signed cert produces a
 #   requirement tied to the cert anchor hash — stable across all builds
-#   signed with the same cert.
+#   signed with the same cert. This is for local/dev use only and will not
+#   remove Gatekeeper's malware warning on other Macs.
 set -euo pipefail
 
 CERT_NAME="${1:-HyperPointer}"

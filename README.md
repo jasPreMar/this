@@ -109,6 +109,8 @@ make dmg
 open dist/HyperPointer.dmg
 ```
 
+For local permission persistence across updates, a self-signed identity is enough. For distribution to other Macs, it is not. Gatekeeper's malware warning only goes away when the shipped artifacts are signed with a real `Developer ID Application` certificate, notarized, and stapled.
+
 On first launch, HyperPointer opens an onboarding wizard that walks through:
 
 - Installing or verifying Claude CLI
@@ -130,12 +132,43 @@ This writes the grants directly to the TCC database so no popups ever appear.
 The `.app` and `.dmg` targets now auto-prefer the best available signing identity in your keychain, starting with `Developer ID Application`, then local development identities. If no stable identity is available they fall back to ad-hoc signing. For a distributable artifact on other Macs, use your real Developer ID identity and notarize the result:
 
 ```bash
-SIGN_MODE=identity SIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)" make dmg
+./scripts/build-app.sh \
+  --sign-mode developer-id \
+  --sign-identity "Developer ID Application: Your Name (TEAMID)"
+
+./scripts/notarize.sh \
+  --path dist/HyperPointer.app \
+  --apple-id "you@example.com" \
+  --team-id "TEAMID" \
+  --password "app-specific-password"
+
+./scripts/build-dmg.sh \
+  --skip-build \
+  --app-path dist/HyperPointer.app \
+  --sign-mode developer-id \
+  --sign-identity "Developer ID Application: Your Name (TEAMID)"
+
+./scripts/notarize.sh \
+  --path dist/HyperPointer.dmg \
+  --apple-id "you@example.com" \
+  --team-id "TEAMID" \
+  --password "app-specific-password"
 ```
+
+If you prefer `notarytool` keychain profiles, `scripts/notarize.sh` also accepts `--keychain-profile <profile>`.
 
 ## Sparkle Release Signing
 
 The GitHub Actions release job signs the published DMG with Sparkle's Ed25519 key. It expects a `SPARKLE_PRIVATE_KEY` repository secret containing the exported private key contents, not the `sparkle:edSignature` output.
+
+The release workflow also requires these secrets for Gatekeeper-safe distribution:
+
+- `DEVELOPER_ID_APPLICATION_P12`
+- `DEVELOPER_ID_APPLICATION_PASSWORD`
+- `DEVELOPER_ID_APPLICATION_NAME`
+- `APPLE_ID`
+- `APPLE_TEAM_ID`
+- `APPLE_APP_SPECIFIC_PASSWORD`
 
 To create or recover the matching keypair:
 

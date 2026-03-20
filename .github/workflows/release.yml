@@ -56,56 +56,85 @@ jobs:
         run: swift package resolve
 
       # -----------------------------------------------------------------------
-      # Code signing — import a self-signed cert so TCC permissions survive
-      # Sparkle updates. Without a stable signature, each new binary gets a
-      # new ad-hoc hash and macOS re-prompts for every permission on first launch.
-      #
-      # One-time setup (run scripts/create-signing-cert.sh, then store outputs):
-      #   SIGNING_CERT_P12          — base64-encoded .p12 file
-      #   SIGNING_CERT_PASSWORD     — password used when exporting the .p12
-      #   SIGNING_CERT_NAME         — Common Name of the cert (e.g. "HyperPointer")
+      # Distribution signing — release artifacts must use a real Developer ID
+      # Application certificate or Gatekeeper will show the malware warning.
       # -----------------------------------------------------------------------
-      - name: Import signing certificate
+      - name: Import Developer ID Application certificate
         id: signing
         env:
-          SIGNING_CERT_P12:      ${{ secrets.SIGNING_CERT_P12 }}
-          SIGNING_CERT_PASSWORD: ${{ secrets.SIGNING_CERT_PASSWORD }}
-          SIGNING_CERT_NAME:     ${{ secrets.SIGNING_CERT_NAME }}
+          DEVELOPER_ID_APPLICATION_P12:      ${{ secrets.DEVELOPER_ID_APPLICATION_P12 }}
+          DEVELOPER_ID_APPLICATION_PASSWORD: ${{ secrets.DEVELOPER_ID_APPLICATION_PASSWORD }}
+          DEVELOPER_ID_APPLICATION_NAME:     ${{ secrets.DEVELOPER_ID_APPLICATION_NAME }}
         run: |
-          if [[ -z "${SIGNING_CERT_P12:-}" ]]; then
-            echo "SIGNING_CERT_P12 not set — falling back to ad-hoc signing."
-            echo "sign_mode=ad-hoc"    >> "$GITHUB_OUTPUT"
-            echo "sign_identity="      >> "$GITHUB_OUTPUT"
-          else
-            KEYCHAIN=build.keychain
-            security create-keychain -p "" "$KEYCHAIN"
-            security default-keychain -s "$KEYCHAIN"
-            security unlock-keychain -p "" "$KEYCHAIN"
-            security set-keychain-settings -t 3600 -u "$KEYCHAIN"
+          missing=()
+          for key in \
+            DEVELOPER_ID_APPLICATION_P12 \
+            DEVELOPER_ID_APPLICATION_PASSWORD \
+            DEVELOPER_ID_APPLICATION_NAME
+          do
+            if [[ -z "${!key:-}" ]]; then
+              missing+=("$key")
+            fi
+          done
 
-            echo "$SIGNING_CERT_P12" | base64 --decode > /tmp/signing.p12
-            security import /tmp/signing.p12 -k "$KEYCHAIN" \
-              -P "$SIGNING_CERT_PASSWORD" -T /usr/bin/codesign
-            rm /tmp/signing.p12
-
-            security set-key-partition-list \
-              -S "apple-tool:,apple:,codesign:" -s -k "" "$KEYCHAIN"
-
-            echo "sign_mode=identity"             >> "$GITHUB_OUTPUT"
-            echo "sign_identity=$SIGNING_CERT_NAME" >> "$GITHUB_OUTPUT"
-            echo "Imported certificate: $SIGNING_CERT_NAME"
+          if (( ${#missing[@]} > 0 )); then
+            echo "Missing required release secrets: ${missing[*]}" >&2
+            exit 1
           fi
+
+          KEYCHAIN=build.keychain-db
+          security create-keychain -p "" "$KEYCHAIN"
+          security default-keychain -s "$KEYCHAIN"
+          security unlock-keychain -p "" "$KEYCHAIN"
+          security set-keychain-settings -t 3600 -u "$KEYCHAIN"
+          security list-keychains -d user -s "$KEYCHAIN"
+
+          echo "$DEVELOPER_ID_APPLICATION_P12" | base64 --decode > /tmp/developer-id.p12
+          security import /tmp/developer-id.p12 -k "$KEYCHAIN" \
+            -P "$DEVELOPER_ID_APPLICATION_PASSWORD" \
+            -T /usr/bin/codesign \
+            -T /usr/bin/xcrun
+          rm /tmp/developer-id.p12
+
+          security set-key-partition-list \
+            -S "apple-tool:,apple:,codesign:" -s -k "" "$KEYCHAIN"
+
+          echo "sign_identity=$DEVELOPER_ID_APPLICATION_NAME" >> "$GITHUB_OUTPUT"
+          echo "Imported certificate: $DEVELOPER_ID_APPLICATION_NAME"
+
+      - name: Build app bundle
+        env:
+          SIGN_IDENTITY: ${{ steps.signing.outputs.sign_identity }}
+        run: |
+          ./scripts/build-app.sh \
+            --sign-mode developer-id \
+            --sign-identity "$SIGN_IDENTITY"
+
+      - name: Notarize app bundle
+        env:
+          APPLE_ID:                    ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID:               ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+        run: |
+          ./scripts/notarize.sh --path dist/HyperPointer.app
 
       - name: Build DMG
         env:
-          SIGN_MODE:     ${{ steps.signing.outputs.sign_mode }}
           SIGN_IDENTITY: ${{ steps.signing.outputs.sign_identity }}
         run: |
-          ARGS=(--sign-mode "$SIGN_MODE")
-          if [[ -n "$SIGN_IDENTITY" ]]; then
-            ARGS+=(--sign-identity "$SIGN_IDENTITY")
-          fi
-          ./scripts/build-dmg.sh "${ARGS[@]}"
+          ./scripts/build-dmg.sh \
+            --skip-build \
+            --app-path dist/HyperPointer.app \
+            --sign-mode developer-id \
+            --sign-identity "$SIGN_IDENTITY"
+
+      - name: Notarize DMG
+        env:
+          APPLE_ID:                    ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID:               ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+        run: |
+          ./scripts/notarize.sh --path dist/HyperPointer.dmg
 
       - name: Collect DMG metadata
         id: dmg

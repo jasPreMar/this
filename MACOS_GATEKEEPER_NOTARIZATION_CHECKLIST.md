@@ -23,9 +23,9 @@ Ad-hoc signing and self-signed certificates are fine for local testing, but they
 
 ## Current Status
 
-- Repo packaging and release workflow have been updated for Developer ID signing and notarization.
-- Apple Developer account approval is still pending.
-- Actual certificate creation and notarization are blocked until Apple finishes account activation.
+- Local build scripts now support a separate `developer-id` signing mode for distributable artifacts.
+- The release workflow now requires Developer ID certificate secrets and notarizes both the `.app` and `.dmg`.
+- A release from `main` should now fail loudly if those secrets are missing instead of silently publishing an ad-hoc build.
 
 ## Files Already Added Or Updated
 
@@ -46,26 +46,14 @@ Ad-hoc signing and self-signed certificates are fine for local testing, but they
 - `APPLE_APP_SPECIFIC_PASSWORD`
 - `SPARKLE_PRIVATE_KEY`
 
-## What To Do While Waiting For Apple Approval
-
-1. Confirm the Apple ID you will use for notarization has 2FA enabled.
-2. Decide whether CI will use:
-   - Apple ID + app-specific password
-   - App Store Connect API key + `notarytool` keychain profile
-3. Create the GitHub secret placeholders listed above.
-4. Generate or verify the Sparkle signing keypair.
-5. Keep testing local `.app` and `.dmg` builds.
-
-## Release Flow Once Apple Approves The Account
+## What To Do Next
 
 1. Create or download the `Developer ID Application` certificate.
 2. Export it as a `.p12`.
 3. Add the Apple and certificate secrets to GitHub.
-4. Build the app with Developer ID signing.
-5. Notarize and staple the `.app`.
-6. Build the DMG from the stapled app.
-7. Notarize and staple the `.dmg`.
-8. Publish the release.
+4. Confirm the Apple ID used for notarization has 2FA enabled and an app-specific password.
+5. Generate or verify the Sparkle signing keypair.
+6. Run one notarized release from `main` and verify the downloaded DMG opens with the normal internet-download prompt instead of the malware block.
 
 ## Local Commands
 
@@ -109,4 +97,4 @@ Developer ID + notarization flow:
 
 ## One-Line Summary
 
-There is no public shortcut around Apple's process: to move from the malware block to the normal first-open prompt, HyperPointer must ship as a Developer ID signed, notarized, stapled macOS release.
+There is no public shortcut around Apple's process: to move from the malware block to the normal first-open prompt, HyperPointer must ship as a Developer ID signed, notarized, stapled macOS release, and the release pipeline now enforces that path.
