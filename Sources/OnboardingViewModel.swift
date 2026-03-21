@@ -207,15 +207,23 @@ final class OnboardingViewModel: ObservableObject {
         guard !isMicrophoneRequestInFlight else { return }
         if prepareAppBundleForSensitivePermissionIfNeeded(.microphone, resumeDestination: resumeDestination) { return }
 
-        if AVCaptureDevice.authorizationStatus(for: .audio) == .authorized {
+        switch AVCaptureDevice.authorizationStatus(for: .audio) {
+        case .authorized:
             refreshPermissionState()
             return
+        case .denied, .restricted:
+            openMicrophoneSettings()
+            return
+        case .notDetermined:
+            break
+        @unknown default:
+            break
         }
 
         isMicrophoneRequestInFlight = true
         NSApp.activate(ignoringOtherApps: true)
 
-        AVCaptureDevice.requestAccess(for: .audio) { granted in
+        AVAudioApplication.requestRecordPermission { granted in
             DispatchQueue.main.async {
                 self.isMicrophoneRequestInFlight = false
                 self.refreshPermissionState()
