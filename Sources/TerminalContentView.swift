@@ -180,8 +180,10 @@ class ClaudeProcessManager: ObservableObject {
             ## Structured UI Output
 
             When your response would benefit from rich formatting (dashboards, summaries, lists, \
-            tables, status overviews), respond with ONLY a JSON object matching this schema — no \
-            markdown, no explanation, no code fences, just raw JSON:
+            tables, status overviews, cards, data displays), respond with ONLY a JSON object \
+            matching this schema. CRITICAL: output the raw JSON and NOTHING else — no preamble \
+            text, no markdown, no explanation before or after, no code fences. The JSON must be \
+            the entire response:
 
             ```
             {
@@ -477,20 +479,47 @@ class ClaudeProcessManager: ObservableObject {
 
         return nil
     }
-    /// Strip markdown code fences (```json ... ``` or ``` ... ```) from LLM output
+    /// Extract JSON from LLM output, handling code fences and preamble text
     static func stripCodeFences(_ text: String) -> String {
         var s = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        // Remove opening fence: ```json or ```
+        // Remove opening code fence: ```json or ```
         if s.hasPrefix("```") {
             if let newlineIndex = s.firstIndex(of: "\n") {
                 s = String(s[s.index(after: newlineIndex)...])
             }
         }
-        // Remove closing fence
+        // Remove closing code fence
         if s.hasSuffix("```") {
             s = String(s.dropLast(3))
         }
-        return s.trimmingCharacters(in: .whitespacesAndNewlines)
+        s = s.trimmingCharacters(in: .whitespacesAndNewlines)
+        // If it's already valid-looking JSON, return it
+        if s.hasPrefix("{") { return s }
+        // Otherwise, extract the first top-level JSON object (handles preamble text)
+        return extractJSON(from: s) ?? s
+    }
+
+    /// Find the first balanced top-level JSON object in a string
+    private static func extractJSON(from text: String) -> String? {
+        guard let start = text.firstIndex(of: "{") else { return nil }
+        var depth = 0
+        var inString = false
+        var escaped = false
+        var end: String.Index?
+        for i in text[start...].indices {
+            let c = text[i]
+            if escaped { escaped = false; continue }
+            if c == "\\" && inString { escaped = true; continue }
+            if c == "\"" { inString.toggle(); continue }
+            if inString { continue }
+            if c == "{" { depth += 1 }
+            else if c == "}" {
+                depth -= 1
+                if depth == 0 { end = i; break }
+            }
+        }
+        guard let e = end else { return nil }
+        return String(text[start...e])
     }
 
     func stop() {
