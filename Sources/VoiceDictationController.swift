@@ -79,7 +79,7 @@ final class VoiceDictationController {
     }
 
     private func requestPermissions(completion: @escaping (Bool) -> Void) {
-        AVCaptureDevice.requestAccess(for: .audio) { microphoneGranted in
+        AVAudioApplication.requestRecordPermission { microphoneGranted in
             guard microphoneGranted else {
                 completion(false)
                 return
