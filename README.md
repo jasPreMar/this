@@ -1,16 +1,46 @@
 # HyperPointer
 
-We have a new kind of computer. It can write code, browse the web, manage files, send emails, and control applications. It's genuinely powerful. But right now, it lives in the command line. You open a chat window, start from a blank page, and describe what you want. Every time. The AI is capable, but it's blind — it doesn't know what's on your screen, what you're looking at, or what you're trying to act on. You have to explain the context yourself before you can give the command.
+## Problem
 
-The interface is a bottleneck.
+### Argument #1 - Pointing & Specifity
 
-One fix is to start with objects instead of words. Your screen is full of them right now — apps, windows, icons, folders, buttons, text fields, images, links. These are the things you're actually trying to act on. If you could point at any one of them and issue a command — open this, rename that, summarize this, rewrite that, delete this, copy that, move this — you'd be giving the AI something it's currently missing: a target. A specific thing to work on, with full context already attached.
+Language is more ergonomic than learning to use a computer. It's universal and adaptable. By teaching computers language, we've created far more ergonomic computers. But it can feel cumberson. Typing is prone to typos. Takes a lot of agility. 
 
-This isn't a new idea — it's actually the original idea behind the graphical user interface. When the first GUIs were designed, they were solving a similar problem. The command line was powerful but required you to know the exact syntax for every operation. The GUI made computing accessible by introducing four things: windows, icons, menus, and a pointer. The pointer let you aim at objects directly. The icons made those objects visible and recognizable. The menus revealed what you could do with them.
+Spoken language is more ergonomic than typed language. We learn to speak years before we learn to write or speak. Speaking is easier, more natural, and more freeing. We can do other things while we speak. But we lose a lot of specificity.
 
-That model held up for decades. But menus were always a workaround — a fixed list of options decided in advance by whoever built the software. You were limited to commands they anticipated.
+But long before we ever utter a word, we look at things, point at things, and demand things. That loop: Look, point, and demand. We can do most of this in our GUIs. We have objects. We have a pointer. And we have a way to demand... *click click*.
 
-With AI, that limitation disappears. You're no longer choosing from a list. You can ask for anything, in plain language, and the system figures out how to do it. So the windows, icons, and pointer are still useful — the spatial, visual model of computing is still the best way to understand what's on your screen. But the menu is the part that can go. Replace it with a command. Replace the fixed list with a conversation. Keep the pointer, keep the objects, and let the AI handle the rest.
+When we speak, why not use out freed up digits to point, and make that visible to the LLM? My hypothesis is that these two forms of communication, done at the exact same time, will result in an extremely fluid and highly controllable interface.
+
+### Argument #2 - Objets & Orientation
+
+Before GUIs, we had command lines. Command lines had two big problems: Memorization and imagination. 
+
+**Memorization**
+We had to memorize the syntax for every operation. If you get it wrong, you get an error. 
+
+**Imagination**
+And we had to imagine what's possible rather than discover it. We had to hold what was possible in our head before feeling confident enough to try it.
+
+GUIs solved both. Objects can easily be depicted with metaphors: folders, files, and icons scattered across on a desk. An object then only has a limited number of possible commands that followed. With text, you can cut, copy, and paste, not open or trash. With folders, you can open, duplicate, or rename, not run or refresh. Going object-first made possibilities discoverable.
+
+As GUIs become ubiquitous, they also became more complex and speciated. You had to learn to use software to get more and more things done, which can be exausting (not to mention, expensive).
+
+So now we have AI. It can use GUIs so we don't have to learn it. It can interpret what we're saying, so we don't have to memorize anything. But the problem of imagination remains. Beacuse we're back to the command-line, we're limited by ability to imagine what's possible.
+
+This is wby I believe objects should come back into play. By orienting an agent in an object, we collapse the space of possible actions. It's less cognitively demanding.
+
+---
+
+## Introducing HyperPointer
+
+Hyperpointer lets launch an agent from any object. Objects are anything you point at. You can already point at a file left click to select it. You can double click to open it. You can right click to see a menu of other possible actions, like rename. But now, with hyperpointer, you can point at it, and with your voice, tell it to open, select all contents, copy those contents, and move them to another folder in another part of your drive and duplicated with a slightly different scheme based on that folder's name. You can point at your browser and tell it what website to go to, what to do when you get there, to copy the contents, and bring it back to this other notes application and based the results. 
+
+If your cursor is an arrow, clicking is a spear, and hyperpointer is a long bow. Or better yet,  hyperpointer turns your arrow into a fully autonomous drone capable of entire chains of action, and returns to you when it's done.
+
+If hyperpointer is done well, we shouldn't need context menus (right click menus) anymore — except in the case of generated contextual ones that aid the user's need to choose an action. In fact, I'd argue that we don't need static menus at all anymore. You can start from an objecct and ask for anything you want, in plain language, and the system figures out how to do it.
+
+---
 
 ## How it works
 
