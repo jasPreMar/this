@@ -4,7 +4,7 @@
 
 ### Argument #1 - Pointing & Specifity
 
-Language is more ergonomic than any computer interface. By teaching computers language, we've created far more ergonomic computers. But it can feel cumberson. Typing is prone to typos. Takes coordination.
+Language is more ergonomic than any computer interface. By teaching computers language, we've gotten more ergonomic computers. But it can feel cumberson. Typing is prone to typos. Takes coordination.
 
 Spoken language is more ergonomic than written language. We learn to speak years before we learn to write or type. Speaking is easier, more natural, and more freeing. We can do other things while we speak. But we lose a lot of specificity.
 
