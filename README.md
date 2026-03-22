@@ -6,7 +6,7 @@
 
 Language is more ergonomic than learning to use a computer. It's universal and adaptable. By teaching computers language, we've created far more ergonomic computers. But it can feel cumberson. Typing is prone to typos. Takes a lot of agility. 
 
-Spoken language is more ergonomic than typed language. We learn to speak years before we learn to write or type. Speaking is easier, more natural, and more freeing. We can do other things while we speak. But we lose a lot of specificity.
+Spoken language is more ergonomic than written language. We learn to speak years before we learn to write or type. Speaking is easier, more natural, and more freeing. We can do other things while we speak. But we lose a lot of specificity.
 
 But long before we ever utter a word, we look at things, point at things, and demand things. That loop: Look, point, and demand. We can do most of this in our GUIs. We have objects. We have a pointer. And we have a way to demand... *click click*.
 
