@@ -14,7 +14,7 @@ When we speak, why not use out freed up digits to point, and make that visible t
 
 ### Argument #2 - Objets & Orientation
 
-The original command line interfaces had two big problems: Memorization and imagination. 
+Classic command line interfaces had two big problems: Memorization and imagination. 
 
 **Memorization:**
 We had to memorize the syntax for every operation. If you get it wrong, you get an error. 
