@@ -58,8 +58,8 @@ class SearchViewModel: ObservableObject {
         }
     }
 
-    func submitMessage() {
-        let message = query.trimmingCharacters(in: .whitespacesAndNewlines)
+    func submitMessage(messageOverride: String? = nil) {
+        let message = (messageOverride ?? query).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !message.isEmpty else { return }
         onMessageSent?()
 
@@ -87,12 +87,12 @@ class SearchViewModel: ObservableObject {
             )
         } else {
             // First message — switch to chat mode
-            let context = buildContextMessage()
+            let context = buildContextMessage(prompt: message)
             onSubmit?(context, hoveredWorkingDirectoryURL)
         }
     }
 
-    func buildContextMessage() -> String {
+    func buildContextMessage(prompt: String? = nil) -> String {
         var lines: [String] = []
 
         if !hoveredParts.isEmpty {
@@ -126,13 +126,17 @@ class SearchViewModel: ObservableObject {
         if !lines.isEmpty {
             lines.append("")
         }
-        lines.append(query)
+        lines.append(prompt ?? query)
 
         return lines.joined(separator: "\n")
     }
 
     func captureHoveredWindowScreenshot() -> (URL?, String) {
         captureScreenshot(for: hoveredAppPID)
+    }
+
+    func captureCurrentScreenScreenshot() -> (URL?, String) {
+        captureScreenContaining(point: hoveredScreenPoint ?? NSEvent.mouseLocation)
     }
 
     func captureFullScreenScreenshot() -> (URL?, String) {
@@ -230,6 +234,49 @@ class SearchViewModel: ObservableObject {
 
         guard let cgImage = cgImage else {
             return (nil, "Screenshot not captured: CGWindowListCreateImage failed")
+        }
+
+        let nsImage = NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
+        guard let tiffData = nsImage.tiffRepresentation,
+              let bitmapRep = NSBitmapImageRep(data: tiffData),
+              let pngData = bitmapRep.representation(using: .png, properties: [:]) else {
+            return (nil, "Screenshot not captured: failed to encode PNG data")
+        }
+
+        let tempURL = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("hp_screenshot_\(UUID().uuidString).png")
+        do {
+            try pngData.write(to: tempURL)
+            let kb = max(1, pngData.count / 1024)
+            return (tempURL, "Screenshot captured: \(cgImage.width)x\(cgImage.height), \(kb) KB")
+        } catch {
+            return (nil, "Screenshot not captured: failed to write temp file (\(error.localizedDescription))")
+        }
+    }
+
+    private func captureScreenContaining(point: CGPoint) -> (URL?, String) {
+        guard CGPreflightScreenCaptureAccess() else {
+            CGRequestScreenCaptureAccess()
+            return (nil, "Screenshot not captured: screen recording permission not granted")
+        }
+
+        let desktopFrame = NSScreen.screens.reduce(CGRect.null) { partialResult, screen in
+            partialResult.union(screen.frame)
+        }
+        let cgPoint = CGPoint(x: point.x, y: desktopFrame.maxY - point.y)
+
+        var displayID = CGMainDisplayID()
+        var count: UInt32 = 0
+        CGGetDisplaysWithPoint(cgPoint, 1, &displayID, &count)
+
+        guard count > 0,
+              let cgImage = CGWindowListCreateImage(
+                  CGDisplayBounds(displayID),
+                  .optionOnScreenOnly,
+                  kCGNullWindowID,
+                  []
+              ) else {
+            return (nil, "Screenshot not captured: failed to capture active display")
         }
 
         let nsImage = NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))

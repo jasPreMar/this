@@ -255,7 +255,7 @@ class FloatingPanel: NSPanel {
             guard let self else { return }
             if self.onTransitionToCommandMenu != nil {
                 orderOut(nil)
-                let (screenshotURL, _) = searchViewModel.captureHoveredWindowScreenshot()
+                let (screenshotURL, _) = searchViewModel.captureCurrentScreenScreenshot()
                 self.startHeadless(
                     message: context,
                     screenshotURL: screenshotURL,
@@ -263,7 +263,7 @@ class FloatingPanel: NSPanel {
                 )
                 self.onTransitionToCommandMenu?(self)
             } else {
-                let (screenshotURL, _) = searchViewModel.captureHoveredWindowScreenshot()
+                let (screenshotURL, _) = searchViewModel.captureCurrentScreenScreenshot()
                 self.transitionToTerminal(
                     message: context,
                     screenshotURL: screenshotURL,
@@ -312,7 +312,7 @@ class FloatingPanel: NSPanel {
             self.cancelPendingRealtimeLogStop()
             let composedMessage = RealtimeInputLog.shared.finalizeSession(withFinalTranscript: transcript) ?? transcript
             self.searchViewModel.query = composedMessage
-            self.searchViewModel.submitMessage()
+            self.searchViewModel.submitMessage(messageOverride: composedMessage)
         }
     }
 
