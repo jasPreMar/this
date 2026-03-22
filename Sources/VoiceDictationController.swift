@@ -12,6 +12,7 @@ final class VoiceDictationController {
 
     var onStateChange: ((State) -> Void)?
     var onLevelChange: ((CGFloat) -> Void)?
+    var onPartialTranscript: ((String) -> Void)?
     var onTranscript: ((String) -> Void)?
 
     private let audioEngine = AVAudioEngine()
@@ -28,6 +29,7 @@ final class VoiceDictationController {
     }
 
     private var latestTranscript = ""
+    private var lastPublishedPartialTranscript = ""
     private var finishWorkItem: DispatchWorkItem?
     private var hasDeliveredResult = false
     private var startGeneration: UInt = 0
@@ -99,6 +101,7 @@ final class VoiceDictationController {
 
         teardownRecognitionSession()
         latestTranscript = ""
+        lastPublishedPartialTranscript = ""
         hasDeliveredResult = false
         onLevelChange?(0)
 
@@ -112,6 +115,14 @@ final class VoiceDictationController {
             if let result {
                 self.latestTranscript = result.bestTranscription.formattedString
                     .trimmingCharacters(in: .whitespacesAndNewlines)
+
+                if !self.latestTranscript.isEmpty,
+                   self.latestTranscript != self.lastPublishedPartialTranscript {
+                    self.lastPublishedPartialTranscript = self.latestTranscript
+                    DispatchQueue.main.async { [latestTranscript = self.latestTranscript, onPartialTranscript = self.onPartialTranscript] in
+                        onPartialTranscript?(latestTranscript)
+                    }
+                }
 
                 if result.isFinal {
                     self.finish(with: self.latestTranscript)

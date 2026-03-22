@@ -168,6 +168,7 @@ class FloatingPanel: NSPanel {
     private var focusRestorationState: FocusRestorationState?
     private var shouldRestoreFocusOnClose = true
     private let voiceController = VoiceDictationController()
+    private var pendingRealtimeLogStopWorkItem: DispatchWorkItem?
     private var mouseShakeDetector = MouseShakeDetector()
     private var invokeHoldBehavior: InvokeHoldBehavior?
     private(set) var taskStartedAt: Date?
@@ -288,14 +289,29 @@ class FloatingPanel: NSPanel {
             self?.resizeToContentSize(size, preserveTopEdge: true)
         }
         voiceController.onStateChange = { [weak self] state in
+            switch state {
+            case .idle:
+                RealtimeInputLog.shared.recordVoiceState("idle")
+            case .listening:
+                RealtimeInputLog.shared.recordVoiceState("listening")
+            case .transcribing:
+                RealtimeInputLog.shared.recordVoiceState("transcribing")
+            case .failed(let message):
+                RealtimeInputLog.shared.recordVoiceState("failed \(message)")
+            }
             self?.handleVoiceStateChange(state)
         }
         voiceController.onLevelChange = { [weak self] level in
             self?.searchViewModel.voiceLevel = level
         }
+        voiceController.onPartialTranscript = { transcript in
+            RealtimeInputLog.shared.recordSpeechPartial(transcript)
+        }
         voiceController.onTranscript = { [weak self] transcript in
             guard let self else { return }
-            self.searchViewModel.query = transcript
+            self.cancelPendingRealtimeLogStop()
+            let composedMessage = RealtimeInputLog.shared.finalizeSession(withFinalTranscript: transcript) ?? transcript
+            self.searchViewModel.query = composedMessage
             self.searchViewModel.submitMessage()
         }
     }
@@ -933,6 +949,8 @@ class FloatingPanel: NSPanel {
 
         saveChatSession()
         removeAllMonitors()
+        cancelPendingRealtimeLogStop()
+        RealtimeInputLog.shared.stopSession()
         voiceController.cancel()
         super.close()
         // Restore panel appearance for potential reuse
@@ -992,6 +1010,8 @@ class FloatingPanel: NSPanel {
         shouldRestoreFocusOnClose = true
 
         removeAllMonitors()
+        cancelPendingRealtimeLogStop()
+        RealtimeInputLog.shared.stopSession()
         voiceController.cancel()
         orderOut(nil)
         isCommandKeyVisible = false
@@ -1061,20 +1081,43 @@ class FloatingPanel: NSPanel {
         case .idle:
             searchViewModel.voiceState = .idle
             searchViewModel.voiceLevel = 0
+            if !isCommandKeyHeld {
+                scheduleRealtimeLogStopIfNeeded()
+            }
         case .listening:
+            cancelPendingRealtimeLogStop()
             searchViewModel.voiceState = .listening
         case .transcribing:
+            cancelPendingRealtimeLogStop()
             searchViewModel.voiceState = .transcribing
             searchViewModel.voiceLevel = 0
         case .failed(let message):
             searchViewModel.voiceState = .failed(message)
             searchViewModel.voiceLevel = 0
+            if !isCommandKeyHeld {
+                RealtimeInputLog.shared.stopSession()
+            }
 
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
                 guard let self, self.searchViewModel.voiceState == .failed(message) else { return }
                 self.searchViewModel.voiceState = .idle
             }
         }
+    }
+
+    private func scheduleRealtimeLogStopIfNeeded() {
+        cancelPendingRealtimeLogStop()
+
+        let workItem = DispatchWorkItem {
+            RealtimeInputLog.shared.stopSession()
+        }
+        pendingRealtimeLogStopWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35, execute: workItem)
+    }
+
+    private func cancelPendingRealtimeLogStop() {
+        pendingRealtimeLogStopWorkItem?.cancel()
+        pendingRealtimeLogStopWorkItem = nil
     }
 
     private var canUseVoiceInputDuringInvokeHold: Bool {

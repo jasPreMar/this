@@ -89,6 +89,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     })
     private var ghostCursorOverlayCoordinator: GhostCursorOverlayCoordinator?
     private var workspaceNotificationObservers: [NSObjectProtocol] = []
+    private var hoverLoggingSession: HoverLoggingSession?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         sharedAppDelegate = self
@@ -144,29 +145,56 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
                 commandKeyPanel = selectedPanel
                 selectedPanel.isCommandKeyHeld = true
                 selectedPanel.startAnchoredVoiceMode(with: modifierFlags)
+                startHoverLogging(using: selectedPanel.searchViewModel)
             } else if let existing = panels.first(where: {
                 $0.isVisible && !$0.searchViewModel.isChatMode
             }) {
                 commandKeyPanel = existing
                 existing.isCommandKeyHeld = true
                 existing.restartCommandKeyMode(with: modifierFlags)
+                startHoverLogging(using: existing.searchViewModel)
             } else {
                 panels.removeAll { !$0.isVisible && !$0.preservesTaskHistory }
                 let panel = makePanel()
                 commandKeyPanel = panel
                 panels.append(panel)
                 panel.startCommandKeyMode(with: modifierFlags)
+                startHoverLogging(using: panel.searchViewModel)
             }
         } else if invokeKeyDown && commandKeyHeld {
             commandKeyPanel?.updateModifierFlags(modifierFlags)
         } else if !invokeKeyDown && commandKeyHeld {
             commandKeyHeld = false
             if let panel = commandKeyPanel {
+                stopHoverLogging(keepRealtimeSessionAlive: panel.searchViewModel.voiceState == .listening || panel.searchViewModel.voiceState == .transcribing)
                 panel.isCommandKeyHeld = false
                 panel.updateModifierFlags(modifierFlags)
                 panel.endInvokeHoldMode()
+            } else {
+                stopHoverLogging()
             }
             commandKeyPanel = nil
+        }
+    }
+
+    private func startHoverLogging(using searchViewModel: SearchViewModel) {
+        RealtimeInputLog.shared.startSession()
+        hoverLoggingSession?.stop()
+        let session = HoverLoggingSession(
+            searchViewModel: searchViewModel,
+            onPauseLogged: { snapshot in
+                RealtimeInputLog.shared.recordHoverPause(snapshot)
+            }
+        )
+        hoverLoggingSession = session
+        session.start()
+    }
+
+    private func stopHoverLogging(keepRealtimeSessionAlive: Bool = false) {
+        hoverLoggingSession?.stop()
+        hoverLoggingSession = nil
+        if !keepRealtimeSessionAlive {
+            RealtimeInputLog.shared.stopSession()
         }
     }
 
@@ -739,9 +767,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
 
     private func makePanel() -> FloatingPanel {
         let panel = FloatingPanel()
-        panel.onCommandKeyDropped = { [weak self] in
+        panel.onCommandKeyDropped = { [weak self, weak panel] in
+            guard let panel else { return }
             self?.commandKeyHeld = false
+            let keepRealtimeSessionAlive = panel.searchViewModel.voiceState == .listening || panel.searchViewModel.voiceState == .transcribing
             self?.commandKeyPanel = nil
+            self?.stopHoverLogging(keepRealtimeSessionAlive: keepRealtimeSessionAlive)
         }
         panel.onFeedbackShake = { [weak self] in
             self?.openFeedbackPage()

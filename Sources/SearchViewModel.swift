@@ -47,6 +47,7 @@ class SearchViewModel: ObservableObject {
     var onClose: (() -> Void)?
     var onMessageSent: (() -> Void)?
     var onStreamingComplete: (() -> Void)?
+    var onHoverSnapshotUpdated: ((HoverSnapshot?) -> Void)?
 
     var isVoiceModeActive: Bool {
         switch voiceState {
@@ -249,7 +250,8 @@ class SearchViewModel: ObservableObject {
         }
     }
 
-    func updateHoveredApp() {
+    @discardableResult
+    func updateHoveredApp() -> HoverSnapshot? {
         let mouseLocation = NSEvent.mouseLocation
         let desktopFrame = NSScreen.screens.reduce(CGRect.null) { partialResult, screen in
             partialResult.union(screen.frame)
@@ -274,7 +276,8 @@ class SearchViewModel: ObservableObject {
             hoveredWorkingDirectoryURL = nil
             consecutiveContainerResults = 0
             lastContainerRole = ""
-            return
+            onHoverSnapshotUpdated?(nil)
+            return nil
         }
 
         // Detect stale accessibility tree: if cursor is moving but we keep getting
@@ -330,6 +333,20 @@ class SearchViewModel: ObservableObject {
         if selectedText != sel {
             selectedText = sel
         }
+
+        let snapshot = HoverSnapshot(
+            timestamp: Date(),
+            processID: hoveredAppPID,
+            description: description,
+            parts: hoveredParts,
+            selectedText: selectedText,
+            elementFrame: hoveredElementFrame,
+            windowFrame: hoveredWindowFrame,
+            screenPoint: hoveredScreenPoint,
+            workingDirectoryURL: hoveredWorkingDirectoryURL
+        )
+        onHoverSnapshotUpdated?(snapshot)
+        return snapshot
     }
 
     private func getSelectedText(element: AXUIElement) -> String {

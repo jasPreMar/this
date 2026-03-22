@@ -31,6 +31,8 @@ enum AppSettings {
         static let ghostCursorClickSoundEnabled = "ghostCursorClickSoundEnabled"
         static let ghostCursorDebugLabelsEnabled = "ghostCursorDebugLabelsEnabled"
         static let structuredUIEnabled = "structuredUIEnabled"
+        static let hoverLoggingEnabled = "hoverLoggingEnabled"
+        static let hoverLoggingDwellDelay = "hoverLoggingDwellDelay"
     }
 
     static func registerDefaults(in defaults: UserDefaults = .standard) {
@@ -44,6 +46,8 @@ enum AppSettings {
             Keys.ghostCursorClickSoundEnabled: false,
             Keys.ghostCursorDebugLabelsEnabled: false,
             Keys.structuredUIEnabled: false,
+            Keys.hoverLoggingEnabled: true,
+            Keys.hoverLoggingDwellDelay: 0.25,
         ])
     }
 
@@ -103,6 +107,21 @@ enum AppSettings {
     static var structuredUIEnabled: Bool {
         get { UserDefaults.standard.bool(forKey: Keys.structuredUIEnabled) }
         set { UserDefaults.standard.set(newValue, forKey: Keys.structuredUIEnabled) }
+    }
+
+    static var hoverLoggingEnabled: Bool {
+        get { UserDefaults.standard.bool(forKey: Keys.hoverLoggingEnabled) }
+        set { UserDefaults.standard.set(newValue, forKey: Keys.hoverLoggingEnabled) }
+    }
+
+    static var hoverLoggingDwellDelay: Double {
+        get {
+            let value = UserDefaults.standard.double(forKey: Keys.hoverLoggingDwellDelay)
+            return value > 0 ? value : 0.25
+        }
+        set {
+            UserDefaults.standard.set(max(0.05, newValue), forKey: Keys.hoverLoggingDwellDelay)
+        }
     }
 
     static var claudeThinkingMode: String {
