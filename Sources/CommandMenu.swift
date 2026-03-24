@@ -90,22 +90,12 @@ final class CommandMenuPanel: NSPanel {
         isOpaque = false
         backgroundColor = .clear
 
-        if #available(macOS 26.0, *) {
-            let glass: NSGlassEffectView
-            if let existingGlass = glassEffectView as? NSGlassEffectView {
-                glass = existingGlass
-            } else {
-                let newGlass = NSGlassEffectView()
-                newGlass.autoresizingMask = [.width, .height]
-                newGlass.style = .regular
-                newGlass.cornerRadius = Self.nativeGlassCornerRadius
-                glassEffectView = newGlass
-                glass = newGlass
-            }
-
-            glass.contentView = hostingView
+        if let glass = glassEffectView ?? NativeGlass.makeView(cornerRadius: Self.nativeGlassCornerRadius) {
+            NativeGlass.attach(contentView: hostingView, to: glass)
+            NativeGlass.updateCornerRadius(Self.nativeGlassCornerRadius, on: glass)
+            glassEffectView = glass
             contentView = glass
-            hasShadow = false
+            hasShadow = true
         } else {
             contentView = hostingView
             hasShadow = true
@@ -163,10 +153,7 @@ struct CommandMenuView: View {
     @State private var bottomBarHeight: CGFloat = Self.fallbackBottomBarHeight
 
     private var usesNativeGlassSurface: Bool {
-        if #available(macOS 26.0, *) {
-            return true
-        }
-        return false
+        NativeGlass.isSupported
     }
 
     private var sortedTasks: [TaskSessionRecord] {

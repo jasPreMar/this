@@ -236,10 +236,7 @@ class FloatingPanel: NSPanel {
     }
 
     private var usesNativeGlassSurface: Bool {
-        if #available(macOS 26.0, *) {
-            return true
-        }
-        return false
+        NativeGlass.isSupported
     }
 
     private var currentGlassCornerRadius: CGFloat {
@@ -345,16 +342,7 @@ class FloatingPanel: NSPanel {
     }
 
     private func installFloatingSurface() {
-        if #available(macOS 26.0, *) {
-            let glass = NSGlassEffectView()
-            glass.autoresizingMask = [.width, .height]
-            glass.contentView = hostingView
-            glass.style = .regular
-            glass.cornerRadius = currentGlassCornerRadius
-            glassEffectView = glass
-        } else {
-            glassEffectView = nil
-        }
+        glassEffectView = NativeGlass.makeView(cornerRadius: currentGlassCornerRadius)
 
         restoreFloatingSurface()
     }
@@ -362,11 +350,10 @@ class FloatingPanel: NSPanel {
     private func restoreFloatingSurface() {
         isOpaque = false
         backgroundColor = .clear
-        hasShadow = false
+        hasShadow = true
 
-        if #available(macOS 26.0, *),
-           let glass = glassEffectView as? NSGlassEffectView {
-            glass.contentView = hostingView
+        if let glass = glassEffectView {
+            NativeGlass.attach(contentView: hostingView, to: glass)
             contentView = glass
         } else {
             contentView = hostingView
@@ -376,9 +363,8 @@ class FloatingPanel: NSPanel {
     }
 
     private func updateGlassCornerRadius() {
-        if #available(macOS 26.0, *),
-           let glass = glassEffectView as? NSGlassEffectView {
-            glass.cornerRadius = currentGlassCornerRadius
+        if let glass = glassEffectView {
+            NativeGlass.updateCornerRadius(currentGlassCornerRadius, on: glass)
         }
     }
 

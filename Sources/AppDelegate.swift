@@ -1,11 +1,14 @@
 import AppKit
 import SwiftUI
 import ApplicationServices
+import Carbon
 import Sparkle
 import WebKit
 
 // Global reference for CGEventTap callback (C function pointers can't capture context)
 private weak var sharedAppDelegate: AppDelegate?
+
+private let commandMenuHotKeySignature: OSType = 0x48505452 // 'HPTR'
 
 // CGEventTap callback — must be a free function (no closures allowed)
 private func rightClickCallback(
@@ -47,17 +50,65 @@ private func rightClickCallback(
     return nil
 }
 
+private func commandMenuHotKeyCallback(
+    proxy: CGEventTapProxy,
+    type: CGEventType,
+    event: CGEvent,
+    refcon: UnsafeMutableRawPointer?
+) -> Unmanaged<CGEvent>? {
+    if type == .tapDisabledByTimeout {
+        if let tap = sharedAppDelegate?.hotKeyEventTap {
+            CGEvent.tapEnable(tap: tap, enable: true)
+        }
+        return Unmanaged.passRetained(event)
+    }
+
+    guard type == .keyDown,
+          !NSApp.isActive else {
+        return Unmanaged.passRetained(event)
+    }
+
+    let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
+    guard keyCode == 49 else {
+        return Unmanaged.passRetained(event)
+    }
+
+    let modifierFlags = NSEvent.ModifierFlags(rawValue: UInt(event.flags.rawValue))
+    guard InvokeHotKey.stored().isPressed(in: modifierFlags) else {
+        return Unmanaged.passRetained(event)
+    }
+
+    DispatchQueue.main.async {
+        sharedAppDelegate?.toggleCommandMenu(from: .invokeHotKey)
+    }
+
+    return Unmanaged.passRetained(event)
+}
+
+private func commandMenuCarbonHotKeyHandler(
+    nextHandler: EventHandlerCallRef?,
+    event: EventRef?,
+    userData: UnsafeMutableRawPointer?
+) -> OSStatus {
+    DispatchQueue.main.async {
+        sharedAppDelegate?.toggleCommandMenu(from: .invokeHotKey)
+    }
+    return noErr
+}
+
 class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
-    private enum CommandMenuPresentationSource {
+    fileprivate enum CommandMenuPresentationSource {
         case statusItem
         case invokeHotKey
     }
 
     var panels: [FloatingPanel] = []
     @Published private(set) var taskRecords: [TaskSessionRecord] = []
-    var hotKeyMonitor: Any?
     private var localHotKeyMonitor: Any?
     fileprivate var eventTap: CFMachPort?
+    fileprivate var hotKeyEventTap: CFMachPort?
+    private var commandMenuHotKeyRef: EventHotKeyRef?
+    private var commandMenuHotKeyHandlerRef: EventHandlerRef?
     private var flagsMonitor: Any?
     private var localFlagsMonitor: Any?
     private var statusItem: NSStatusItem?
@@ -90,6 +141,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     private var ghostCursorOverlayCoordinator: GhostCursorOverlayCoordinator?
     private var workspaceNotificationObservers: [NSObjectProtocol] = []
     private var hoverLoggingSession: HoverLoggingSession?
+    private var defaultsObserver: NSObjectProtocol?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         sharedAppDelegate = self
@@ -102,12 +154,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         setupStatusItem()
         checkForUpdateInBackground()
         setupRightClickTapIfNeeded()
+        refreshCommandMenuHotKeyRegistration()
         loadPersistedChatSessions()
         showOnboardingIfNeeded()
 
-        // Global hotkey: selected invoke key + Space toggles the task overlay.
-        hotKeyMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            self?.handleGlobalKeyDown(event)
+        defaultsObserver = NotificationCenter.default.addObserver(
+            forName: UserDefaults.didChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.refreshCommandMenuHotKeyRegistration()
         }
 
         // Also monitor local events so it works when our app is active.
@@ -198,16 +254,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         }
     }
 
-    private func handleGlobalKeyDown(_ event: NSEvent) {
-        guard event.keyCode == 49,
-              InvokeHotKey.stored().isPressed(in: event.modifierFlags) else { return }
-
-        DispatchQueue.main.async { [weak self] in
-            self?.toggleCommandMenu(from: .invokeHotKey)
-        }
-    }
-
     private func handleLocalKeyDown(_ event: NSEvent) -> NSEvent? {
+        guard usesEventTapForCommandMenuHotKey else {
+            return event
+        }
+
         guard event.keyCode == 49,
               InvokeHotKey.stored().isPressed(in: event.modifierFlags) else {
             return event
@@ -553,12 +604,20 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         NSApp.activate(ignoringOtherApps: true)
     }
 
-    private func toggleCommandMenu(from source: CommandMenuPresentationSource) {
+    fileprivate func toggleCommandMenu(from source: CommandMenuPresentationSource) {
         if commandMenuPanel?.isVisible == true {
             closeCommandMenu()
         } else {
             showCommandMenu(from: source)
         }
+    }
+
+    private func commandMenuLevel(for source: CommandMenuPresentationSource) -> NSWindow.Level {
+        .floating
+    }
+
+    private func commandMenuCollectionBehavior(for source: CommandMenuPresentationSource) -> NSWindow.CollectionBehavior {
+        [.canJoinAllSpaces, .fullScreenAuxiliary]
     }
 
     private func showCommandMenu(from source: CommandMenuPresentationSource, navigateToChat: TaskSessionRecord? = nil) {
@@ -573,11 +632,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             )
             panel.isFloatingPanel = true
             panel.hidesOnDeactivate = false
-            panel.level = .modalPanel
+            panel.level = commandMenuLevel(for: source)
             panel.isOpaque = false
             panel.backgroundColor = .clear
             panel.hasShadow = true
-            panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+            panel.collectionBehavior = commandMenuCollectionBehavior(for: source)
             panel.isReleasedWhenClosed = false
             panel.onEscape = { [weak self] in
                 self?.handleCommandMenuEscape()
@@ -588,7 +647,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         if source == .invokeHotKey {
             dismissCommandKeyPanelForCommandMenu()
         }
-        commandMenuPanel?.level = .modalPanel
+        commandMenuPanel?.level = commandMenuLevel(for: source)
+        commandMenuPanel?.collectionBehavior = commandMenuCollectionBehavior(for: source)
         commandMenuPanel?.setRootView(CommandMenuView(appDelegate: self))
         positionCommandMenu(for: source)
         installCommandMenuEventMonitors()
@@ -728,8 +788,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     private func updateAccessibilityMonitoring(isGranted: Bool) {
         if isGranted {
             setupRightClickTapIfNeeded()
+            refreshCommandMenuHotKeyRegistration()
         } else {
             tearDownRightClickTap()
+            tearDownHotKeyTap()
+            unregisterCommandMenuHotKey()
         }
     }
 
@@ -742,6 +805,17 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         guard let tap = eventTap else { return }
         CFMachPortInvalidate(tap)
         eventTap = nil
+    }
+
+    private func setupHotKeyTapIfNeeded() {
+        guard hotKeyEventTap == nil, AXIsProcessTrusted() else { return }
+        setupHotKeyTap()
+    }
+
+    private func tearDownHotKeyTap() {
+        guard let tap = hotKeyEventTap else { return }
+        CFMachPortInvalidate(tap)
+        hotKeyEventTap = nil
     }
 
     private func setupRightClickTap() {
@@ -764,6 +838,100 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         let runLoopSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
         CFRunLoopAddSource(CFRunLoopGetCurrent(), runLoopSource, .commonModes)
         CGEvent.tapEnable(tap: tap, enable: true)
+    }
+
+    private func setupHotKeyTap() {
+        let eventMask: CGEventMask = (1 << CGEventType.keyDown.rawValue)
+
+        guard let tap = CGEvent.tapCreate(
+            tap: .cgSessionEventTap,
+            place: .headInsertEventTap,
+            options: .listenOnly,
+            eventsOfInterest: eventMask,
+            callback: commandMenuHotKeyCallback,
+            userInfo: nil
+        ) else {
+            print("Failed to create hotkey event tap — ensure Accessibility/Input Monitoring permissions are granted.")
+            return
+        }
+
+        hotKeyEventTap = tap
+
+        let runLoopSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
+        CFRunLoopAddSource(CFRunLoopGetCurrent(), runLoopSource, .commonModes)
+        CGEvent.tapEnable(tap: tap, enable: true)
+    }
+
+    private var usesEventTapForCommandMenuHotKey: Bool {
+        InvokeHotKey.stored() == .function
+    }
+
+    private func refreshCommandMenuHotKeyRegistration() {
+        if usesEventTapForCommandMenuHotKey {
+            unregisterCommandMenuHotKey()
+            setupHotKeyTapIfNeeded()
+        } else {
+            tearDownHotKeyTap()
+            registerCommandMenuHotKey()
+        }
+    }
+
+    private func registerCommandMenuHotKey() {
+        guard let modifiers = carbonModifiers(for: InvokeHotKey.stored()) else { return }
+
+        installCommandMenuHotKeyHandlerIfNeeded()
+        unregisterCommandMenuHotKey()
+
+        let hotKeyID = EventHotKeyID(signature: commandMenuHotKeySignature, id: 1)
+        let status = RegisterEventHotKey(
+            UInt32(kVK_Space),
+            modifiers,
+            hotKeyID,
+            GetApplicationEventTarget(),
+            0,
+            &commandMenuHotKeyRef
+        )
+
+        if status != noErr {
+            print("Failed to register command menu hotkey: \(status)")
+        }
+    }
+
+    private func unregisterCommandMenuHotKey() {
+        guard let hotKeyRef = commandMenuHotKeyRef else { return }
+        UnregisterEventHotKey(hotKeyRef)
+        commandMenuHotKeyRef = nil
+    }
+
+    private func installCommandMenuHotKeyHandlerIfNeeded() {
+        guard commandMenuHotKeyHandlerRef == nil else { return }
+
+        var eventType = EventTypeSpec(
+            eventClass: OSType(kEventClassKeyboard),
+            eventKind: UInt32(kEventHotKeyPressed)
+        )
+
+        InstallEventHandler(
+            GetApplicationEventTarget(),
+            commandMenuCarbonHotKeyHandler,
+            1,
+            &eventType,
+            nil,
+            &commandMenuHotKeyHandlerRef
+        )
+    }
+
+    private func carbonModifiers(for hotKey: InvokeHotKey) -> UInt32? {
+        switch hotKey {
+        case .command:
+            return UInt32(cmdKey)
+        case .option:
+            return UInt32(optionKey)
+        case .control:
+            return UInt32(controlKey)
+        case .function:
+            return nil
+        }
     }
 
     private func makePanel() -> FloatingPanel {

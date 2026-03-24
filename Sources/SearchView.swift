@@ -6,10 +6,7 @@ struct SearchView: View {
     @State private var textWidth: CGFloat = FocusedTextField.minWidth
 
     private var usesNativeGlassSurface: Bool {
-        if #available(macOS 26.0, *) {
-            return true
-        }
-        return false
+        NativeGlass.isSupported
     }
 
     var body: some View {
@@ -73,12 +70,7 @@ struct PanelSurface<Content: View>: View {
         minWidth: CGFloat = 168,
         maxWidth: CGFloat = 320,
         fixedHeight: CGFloat? = nil,
-        usesNativeGlassSurface: Bool = {
-            if #available(macOS 26.0, *) {
-                return true
-            }
-            return false
-        }(),
+        usesNativeGlassSurface: Bool = NativeGlass.isSupported,
         @ViewBuilder content: () -> Content
     ) {
         self.minWidth = minWidth
