@@ -5,6 +5,13 @@ struct SearchView: View {
     @State private var textHeight: CGFloat = 18
     @State private var textWidth: CGFloat = FocusedTextField.minWidth
 
+    private var usesNativeGlassSurface: Bool {
+        if #available(macOS 26.0, *) {
+            return true
+        }
+        return false
+    }
+
     var body: some View {
         if viewModel.isMinimalMode {
             minimalIndicator
@@ -14,27 +21,23 @@ struct SearchView: View {
     }
 
     private var minimalIndicator: some View {
-        Group {
-            if let icon = viewModel.hoveredContextIcon {
-                Image(nsImage: icon)
-                    .resizable()
-                    .interpolation(.high)
-                    .scaledToFit()
-                    .frame(width: 20, height: 20)
-                    .clipShape(RoundedRectangle(cornerRadius: 4))
-            } else {
-                Image(systemName: "command")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundColor(.primary)
+        PanelChrome(cornerRadius: 10, usesNativeGlassSurface: usesNativeGlassSurface) {
+            Group {
+                if let icon = viewModel.hoveredContextIcon {
+                    Image(nsImage: icon)
+                        .resizable()
+                        .interpolation(.high)
+                        .scaledToFit()
+                        .frame(width: 20, height: 20)
+                        .clipShape(RoundedRectangle(cornerRadius: 4))
+                } else {
+                    Image(systemName: "command")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(.primary)
+                }
             }
+            .padding(8)
         }
-        .padding(8)
-        .background(.ultraThinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 10))
-        .shadow(color: .black.opacity(0.12), radius: 2, x: 0, y: 1)
-        .shadow(color: .black.opacity(0.08), radius: 8, x: 0, y: 4)
-        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.primary.opacity(0.15), lineWidth: 0.5))
-        .padding(16)
     }
 
     private var fullPanel: some View {
@@ -63,34 +66,67 @@ struct PanelSurface<Content: View>: View {
     private let minWidth: CGFloat
     private let maxWidth: CGFloat
     private let fixedHeight: CGFloat?
+    private let usesNativeGlassSurface: Bool
     private let content: Content
 
     init(
-        minWidth: CGFloat = 188,
-        maxWidth: CGFloat = 360,
+        minWidth: CGFloat = 168,
+        maxWidth: CGFloat = 320,
         fixedHeight: CGFloat? = nil,
+        usesNativeGlassSurface: Bool = {
+            if #available(macOS 26.0, *) {
+                return true
+            }
+            return false
+        }(),
         @ViewBuilder content: () -> Content
     ) {
         self.minWidth = minWidth
         self.maxWidth = maxWidth
         self.fixedHeight = fixedHeight
+        self.usesNativeGlassSurface = usesNativeGlassSurface
         self.content = content()
     }
 
     var body: some View {
-        content
-            .frame(minWidth: minWidth, maxWidth: maxWidth, alignment: .leading)
-            .frame(height: fixedHeight, alignment: .top)
-            .fixedSize(horizontal: true, vertical: fixedHeight == nil)
-            .background(.ultraThinMaterial)
-            .clipShape(RoundedRectangle(cornerRadius: 12))
-            .shadow(color: .black.opacity(0.12), radius: 2, x: 0, y: 1)
-            .shadow(color: .black.opacity(0.08), radius: 8, x: 0, y: 4)
-            .overlay(
-                RoundedRectangle(cornerRadius: 12)
-                    .stroke(Color.primary.opacity(0.15), lineWidth: 0.5)
-            )
-            .padding(16)
+        PanelChrome(cornerRadius: 12, usesNativeGlassSurface: usesNativeGlassSurface) {
+            content
+                .frame(minWidth: minWidth, maxWidth: maxWidth, alignment: .leading)
+                .frame(height: fixedHeight, alignment: .top)
+                .fixedSize(horizontal: true, vertical: fixedHeight == nil)
+        }
+    }
+}
+
+private struct PanelChrome<Content: View>: View {
+    let cornerRadius: CGFloat
+    let usesNativeGlassSurface: Bool
+    let content: Content
+
+    init(
+        cornerRadius: CGFloat,
+        usesNativeGlassSurface: Bool,
+        @ViewBuilder content: () -> Content
+    ) {
+        self.cornerRadius = cornerRadius
+        self.usesNativeGlassSurface = usesNativeGlassSurface
+        self.content = content()
+    }
+
+    var body: some View {
+        if usesNativeGlassSurface {
+            content
+        } else {
+            content
+                .background(.ultraThinMaterial)
+                .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
+                .shadow(color: .black.opacity(0.12), radius: 2, x: 0, y: 1)
+                .shadow(color: .black.opacity(0.08), radius: 8, x: 0, y: 4)
+                .overlay(
+                    RoundedRectangle(cornerRadius: cornerRadius)
+                        .stroke(Color.primary.opacity(0.15), lineWidth: 0.5)
+                )
+        }
     }
 }
 
@@ -152,8 +188,8 @@ struct PanelHeaderSection<Accessory: View>: View {
                     accessory
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 7)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
             } else if viewModel.isVoiceModeActive {
                 HStack(spacing: 8) {
                     Image(systemName: "mic.fill")
@@ -187,8 +223,8 @@ struct PanelHeaderSection<Accessory: View>: View {
                     accessory
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 7)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
             }
         }
     }
@@ -238,8 +274,8 @@ struct PanelInputRow: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 7)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
     }
 }
 
@@ -251,7 +287,7 @@ struct FocusedTextField: NSViewRepresentable {
     var onKeyDown: ((NSEvent) -> Bool)? = nil
     var font: NSFont = .monospacedSystemFont(ofSize: 13, weight: .regular)
     static let minWidth: CGFloat = 80
-    static let maxWidth: CGFloat = 292
+    static let maxWidth: CGFloat = 260
     static let maxHeight: CGFloat = 120
 
     final class InputTextView: NSTextView {

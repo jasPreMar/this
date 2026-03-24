@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import Combine
 
 class FloatingPanel: NSPanel {
     private static let maxPanelDimension: CGFloat = 392
@@ -159,6 +160,7 @@ class FloatingPanel: NSPanel {
     private var dragStartMonitor: Any?
     private var pendingDragEvent: NSEvent?
     private var hostingView: NSHostingView<PanelContentView>!
+    private var glassEffectView: NSView?
     private var isTerminalMode = false
     private var isCommandKeyVisible = false
     private var isCursorFollowing = false
@@ -171,6 +173,7 @@ class FloatingPanel: NSPanel {
     private var pendingRealtimeLogStopWorkItem: DispatchWorkItem?
     private var mouseShakeDetector = MouseShakeDetector()
     private var invokeHoldBehavior: InvokeHoldBehavior?
+    private var cancellables = Set<AnyCancellable>()
     private(set) var taskStartedAt: Date?
     private(set) var taskCompletedAt: Date?
     private(set) var taskLastActivityAt: Date?
@@ -232,6 +235,24 @@ class FloatingPanel: NSPanel {
         )
     }
 
+    private var usesNativeGlassSurface: Bool {
+        if #available(macOS 26.0, *) {
+            return true
+        }
+        return false
+    }
+
+    private var currentGlassCornerRadius: CGFloat {
+        searchViewModel.isMinimalMode ? 10 : 14
+    }
+
+    private func normalizedFloatingBodySize(_ size: CGSize) -> CGSize {
+        CGSize(
+            width: min(ceil(size.width), Self.maxPanelDimension),
+            height: min(ceil(size.height), Self.maxPanelDimension)
+        )
+    }
+
     init() {
         super.init(
             contentRect: NSRect(x: 0, y: 0, width: 200, height: 36),
@@ -248,7 +269,8 @@ class FloatingPanel: NSPanel {
         hidesOnDeactivate = false
 
         hostingView = NSHostingView(rootView: PanelContentView(viewModel: searchViewModel))
-        contentView = hostingView
+        hostingView.autoresizingMask = [.width, .height]
+        installFloatingSurface()
 
         // Wire up the submit callback
         searchViewModel.onSubmit = { [weak self] context, workingDirectoryURL in
@@ -313,6 +335,50 @@ class FloatingPanel: NSPanel {
             let composedMessage = RealtimeInputLog.shared.finalizeSession(withFinalTranscript: transcript) ?? transcript
             self.searchViewModel.query = composedMessage
             self.searchViewModel.submitMessage(messageOverride: composedMessage)
+        }
+
+        searchViewModel.$isMinimalMode
+            .sink { [weak self] _ in
+                self?.updateGlassCornerRadius()
+            }
+            .store(in: &cancellables)
+    }
+
+    private func installFloatingSurface() {
+        if #available(macOS 26.0, *) {
+            let glass = NSGlassEffectView()
+            glass.autoresizingMask = [.width, .height]
+            glass.contentView = hostingView
+            glass.style = .regular
+            glass.cornerRadius = currentGlassCornerRadius
+            glassEffectView = glass
+        } else {
+            glassEffectView = nil
+        }
+
+        restoreFloatingSurface()
+    }
+
+    private func restoreFloatingSurface() {
+        isOpaque = false
+        backgroundColor = .clear
+        hasShadow = false
+
+        if #available(macOS 26.0, *),
+           let glass = glassEffectView as? NSGlassEffectView {
+            glass.contentView = hostingView
+            contentView = glass
+        } else {
+            contentView = hostingView
+        }
+
+        updateGlassCornerRadius()
+    }
+
+    private func updateGlassCornerRadius() {
+        if #available(macOS 26.0, *),
+           let glass = glassEffectView as? NSGlassEffectView {
+            glass.cornerRadius = currentGlassCornerRadius
         }
     }
 
@@ -379,11 +445,11 @@ class FloatingPanel: NSPanel {
         searchViewModel.query = ""
         searchViewModel.updateHoveredApp()
         isCursorFollowing = false
+        restoreFloatingSurface()
 
-        let fittingSize = hostingView.fittingSize
+        let fittingSize = normalizedFloatingBodySize(hostingView.fittingSize)
         setContentSize(fittingSize)
 
-        // Position at click point with slight offset, clamped to screen
         let x = point.x + 4
         let y = point.y - fittingSize.height - 4
 
@@ -410,6 +476,7 @@ class FloatingPanel: NSPanel {
     func show() {
         searchViewModel.query = ""
         isCursorFollowing = true
+        restoreFloatingSurface()
 
         positionAtCursor()
         prepareForTextInputFocus()
@@ -458,6 +525,8 @@ class FloatingPanel: NSPanel {
         isOpaque = true
         backgroundColor = .windowBackgroundColor
         hasShadow = true
+        contentView = hostingView
+
         let chatSize = CGSize(width: 460, height: 200)
         setContentSize(chatSize)
         positionTaskWindow(
@@ -712,7 +781,7 @@ class FloatingPanel: NSPanel {
 
     private func positionAtCursor(using mouse: NSPoint) {
         guard !isTerminalMode else { return }
-        let fittingSize = hostingView.fittingSize
+        let fittingSize = normalizedFloatingBodySize(hostingView.fittingSize)
         setContentSize(fittingSize)
 
         let x = mouse.x + 4
@@ -740,17 +809,13 @@ class FloatingPanel: NSPanel {
                      display: true, animate: false)
             return
         }
-        let normalizedSize = CGSize(
-            width: min(ceil(size.width), Self.maxPanelDimension),
-            height: min(ceil(size.height), Self.maxPanelDimension)
-        )
+        let normalizedSize = normalizedFloatingBodySize(size)
         guard normalizedSize.width > 0, normalizedSize.height > 0 else { return }
         guard abs(normalizedSize.width - lastReportedContentSize.width) > 0.5 ||
               abs(normalizedSize.height - lastReportedContentSize.height) > 0.5 else { return }
         lastReportedContentSize = normalizedSize
 
         guard isVisible else { return }
-
         let previousTop = frame.maxY
         let previousOriginX = frame.minX
 
@@ -957,9 +1022,7 @@ class FloatingPanel: NSPanel {
         if isTerminalMode {
             styleMask = [.borderless, .nonactivatingPanel]
             level = .screenSaver
-            isOpaque = false
-            backgroundColor = .clear
-            hasShadow = false
+            restoreFloatingSurface()
         }
         searchViewModel.query = ""
         searchViewModel.isChatMode = false
