@@ -12,6 +12,7 @@ final class TaskSessionRecord: ObservableObject, Identifiable {
     @Published var subtitle: String
     @Published var icon: NSImage?
     @Published var startedAt: Date
+    @Published var currentStreamStartedAt: Date?
     @Published var completedAt: Date?
     @Published var lastActivityAt: Date
     @Published var isWindowVisible: Bool
@@ -26,6 +27,7 @@ final class TaskSessionRecord: ObservableObject, Identifiable {
         self.subtitle = panel.taskDisplaySubtitle
         self.icon = panel.taskDisplayIcon
         self.startedAt = startedAt
+        self.currentStreamStartedAt = panel.currentStreamStartedAt
         self.completedAt = panel.taskCompletedAt
         self.lastActivityAt = panel.taskLastActivityAt ?? startedAt
         self.isWindowVisible = panel.isVisible
@@ -40,6 +42,7 @@ final class TaskSessionRecord: ObservableObject, Identifiable {
         self.subtitle = session.subtitle
         self.icon = nil
         self.startedAt = session.startedAt
+        self.currentStreamStartedAt = nil
         self.completedAt = session.completedAt
         self.lastActivityAt = session.lastActivityAt
         self.isWindowVisible = false
@@ -56,6 +59,7 @@ final class TaskSessionRecord: ObservableObject, Identifiable {
         subtitle = panel.taskDisplaySubtitle
         icon = panel.taskDisplayIcon
         startedAt = panel.taskStartedAt ?? startedAt
+        currentStreamStartedAt = panel.currentStreamStartedAt
         completedAt = panel.taskCompletedAt
         lastActivityAt = panel.taskLastActivityAt ?? lastActivityAt
         isWindowVisible = panel.isVisible

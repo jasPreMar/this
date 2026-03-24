@@ -217,6 +217,10 @@ class FloatingPanel: NSPanel {
         }
     }
 
+    var currentStreamStartedAt: Date? {
+        searchViewModel.claudeManager?.currentStreamStartedAt
+    }
+
     var ghostCursorAnchorPoint: CGPoint {
         if let hoveredScreenPoint = searchViewModel.hoveredScreenPoint {
             return hoveredScreenPoint

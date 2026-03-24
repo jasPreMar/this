@@ -561,7 +561,9 @@ private struct CommandMenuTaskRow: View {
 
                 Spacer(minLength: 16)
 
-                TaskRuntimeStatusView(task: task)
+                if let startedAt = task.currentStreamStartedAt {
+                    ActiveStreamBadgeView(startedAt: startedAt)
+                }
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 11)
@@ -601,57 +603,6 @@ private struct CommandMenuTaskRow: View {
                         .foregroundStyle(.secondary)
                 }
         }
-    }
-}
-
-struct TaskRuntimeStatusView: View {
-    @ObservedObject var task: TaskSessionRecord
-    @State private var pulse = false
-
-    var body: some View {
-        TimelineView(.periodic(from: .now, by: 1)) { timeline in
-            let running = task.isRunning
-            let endTime = running ? timeline.date : (task.completedAt ?? timeline.date)
-
-            HStack(spacing: 7) {
-                Image(systemName: "circle.grid.2x2.fill")
-                    .font(.system(size: 11))
-                    .foregroundStyle(running ? Color.green : Color.secondary)
-                    .opacity(running && pulse ? 0.45 : 0.95)
-
-                Text(formattedElapsed(endTime.timeIntervalSince(task.startedAt)))
-                    .font(.system(size: 12, weight: .medium, design: .monospaced))
-                    .foregroundStyle(running ? Color.green : Color.secondary)
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(
-                Capsule(style: .continuous)
-                    .fill((running ? Color.green : Color.black).opacity(running ? 0.12 : 0.06))
-            )
-        }
-        .onAppear {
-            withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) {
-                pulse = true
-            }
-        }
-    }
-
-    private func formattedElapsed(_ elapsed: TimeInterval) -> String {
-        let totalSeconds = max(Int(elapsed.rounded(.down)), 0)
-        let hours = totalSeconds / 3600
-        let minutes = (totalSeconds % 3600) / 60
-        let seconds = totalSeconds % 60
-
-        if hours > 0 {
-            return String(format: "%dh %02dm", hours, minutes)
-        }
-
-        if minutes > 0 {
-            return String(format: "%dm %02ds", minutes, seconds)
-        }
-
-        return "\(seconds)s"
     }
 }
 
@@ -742,8 +693,6 @@ private struct CommandMenuChatDetailView: View {
                 .lineLimit(1)
 
             Spacer(minLength: 16)
-
-            TaskRuntimeStatusView(task: task)
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 12)

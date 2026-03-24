@@ -35,6 +35,14 @@ class ClaudeProcessManager: ObservableObject {
     @Published var status: StreamStatus = .waiting {
         didSet {
             if oldValue != status {
+                switch status {
+                case .streaming:
+                    if oldValue != .streaming {
+                        currentStreamStartedAt = Date()
+                    }
+                case .waiting, .done, .error:
+                    currentStreamStartedAt = nil
+                }
                 onStatusChange?(status)
             }
         }
@@ -42,6 +50,7 @@ class ClaudeProcessManager: ObservableObject {
     @Published var events: [StreamEvent] = []
     @Published var activeToolName: String?
     @Published var activeToolStartTime: Date?
+    @Published var currentStreamStartedAt: Date?
     @Published var structuredUIResponse: UIResponse?
     var onComplete: ((String) -> Void)?
     var onStatusChange: ((StreamStatus) -> Void)?
@@ -66,6 +75,7 @@ class ClaudeProcessManager: ObservableObject {
             self.status = .waiting
             self.activeToolName = nil
             self.activeToolStartTime = nil
+            self.currentStreamStartedAt = nil
             self.structuredUIResponse = nil
         }
         isStopped = false
@@ -527,6 +537,7 @@ class ClaudeProcessManager: ObservableObject {
         DispatchQueue.main.async {
             self.activeToolName = nil
             self.activeToolStartTime = nil
+            self.currentStreamStartedAt = nil
         }
         if let proc = process, proc.isRunning {
             let pid = proc.processIdentifier
@@ -553,88 +564,65 @@ class ClaudeProcessManager: ObservableObject {
     }
 }
 
-// MARK: - Streaming Timer View
+// MARK: - Stream Elapsed Time
 
-struct StreamingTimerView: View {
-    @State private var elapsed: TimeInterval = 0
+enum StreamElapsedFormatting {
+    static func text(for elapsed: TimeInterval) -> String {
+        String(format: "%.1fs", max(elapsed, 0))
+    }
+}
+
+struct InlineStreamElapsedView: View {
+    let startedAt: Date
     @State private var animateIcon = false
 
-    let timer = Timer.publish(every: 0.1, on: .main, in: .common).autoconnect()
-
     var body: some View {
-        HStack(spacing: 5) {
-            Image(systemName: "circle.grid.2x2.fill")
-                .font(.system(size: 10))
-                .foregroundColor(.secondary)
-                .opacity(animateIcon ? 0.4 : 1.0)
-                .animation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true), value: animateIcon)
+        TimelineView(.periodic(from: .now, by: 0.1)) { timeline in
+            HStack(spacing: 5) {
+                Image(systemName: "circle.grid.2x2.fill")
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary)
+                    .opacity(animateIcon ? 0.4 : 1.0)
+                    .animation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true), value: animateIcon)
 
-            Text(String(format: "%.1fs", elapsed))
-                .font(.system(size: 11, design: .monospaced))
-                .foregroundColor(.secondary)
+                Text(StreamElapsedFormatting.text(for: timeline.date.timeIntervalSince(startedAt)))
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(.secondary)
+            }
         }
         .onAppear {
-            elapsed = 0
             animateIcon = true
-        }
-        .onReceive(timer) { _ in
-            elapsed += 0.1
         }
     }
 }
 
-// MARK: - Active Tool Indicator
-
-struct ActiveToolIndicatorView: View {
-    let toolName: String
-    let startTime: Date
-    @State private var elapsed: TimeInterval = 0
-    @State private var animateDots = false
-
-    let timer = Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()
-
-    private var displayName: String {
-        switch toolName.lowercased() {
-        case "bash": return "Running command"
-        case "read": return "Reading file"
-        case "write": return "Writing file"
-        case "edit": return "Editing file"
-        case "glob": return "Searching files"
-        case "grep": return "Searching content"
-        case "webfetch": return "Fetching page"
-        case "websearch": return "Searching web"
-        default: return "Running \(toolName)"
-        }
-    }
+struct ActiveStreamBadgeView: View {
+    let startedAt: Date
+    @State private var pulse = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            HStack(spacing: 5) {
-                ProgressView()
-                    .controlSize(.small)
-                    .scaleEffect(0.7)
+        TimelineView(.periodic(from: .now, by: 0.1)) { timeline in
+            HStack(spacing: 7) {
+                Image(systemName: "circle.grid.2x2.fill")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Color.green)
+                    .opacity(pulse ? 0.45 : 0.95)
 
-                Text("\(displayName)\(animateDots ? "..." : "..")")
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundColor(.secondary)
-
-                Text(String(format: "%.0fs", elapsed))
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundColor(.secondary.opacity(0.6))
+                Text(StreamElapsedFormatting.text(for: timeline.date.timeIntervalSince(startedAt)))
+                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    .foregroundStyle(Color.green)
             }
-
-            if elapsed >= 30 {
-                Text("Press Esc to stop")
-                    .font(.system(size: 10))
-                    .foregroundColor(.secondary.opacity(0.5))
-            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(Color.green.opacity(0.12))
+            )
         }
         .onAppear {
-            elapsed = Date().timeIntervalSince(startTime)
-        }
-        .onReceive(timer) { _ in
-            elapsed = Date().timeIntervalSince(startTime)
-            animateDots.toggle()
+            withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) {
+                pulse = true
+            }
         }
     }
 }
@@ -967,16 +955,12 @@ struct StreamingContentView: View {
     var body: some View {
         EventsSummaryView(events: manager.events, isDone: manager.status == .done)
 
-        if manager.status == .waiting || manager.status == .streaming {
-            if let toolName = manager.activeToolName,
-               let startTime = manager.activeToolStartTime {
-                ActiveToolIndicatorView(toolName: toolName, startTime: startTime)
-            }
-            StreamingTimerView()
-        }
-
         if !manager.outputText.isEmpty {
             AssistantContentView(text: manager.outputText, structuredUI: manager.structuredUIResponse)
+        }
+
+        if let startedAt = manager.currentStreamStartedAt {
+            InlineStreamElapsedView(startedAt: startedAt)
         }
     }
 }
