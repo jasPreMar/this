@@ -2,7 +2,7 @@ import SwiftUI
 
 struct SearchView: View {
     @ObservedObject var viewModel: SearchViewModel
-    @State private var textHeight: CGFloat = 18
+    @State private var textHeight: CGFloat = 20
     @State private var textWidth: CGFloat = FocusedTextField.minWidth
 
     private var usesNativeGlassSurface: Bool {
@@ -38,7 +38,10 @@ struct SearchView: View {
     }
 
     private var fullPanel: some View {
-        PanelSurface {
+        PanelSurface(
+            minWidth: viewModel.isCommandKeyMode ? 168 : 320,
+            maxWidth: viewModel.isCommandKeyMode ? 168 : 320
+        ) {
             VStack(alignment: .leading, spacing: 0) {
                 PanelHeaderSection(viewModel: viewModel)
 
@@ -181,7 +184,7 @@ struct PanelHeaderSection<Accessory: View>: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 10)
-                .padding(.vertical, 6)
+                .padding(.vertical, 8)
             } else if viewModel.isVoiceModeActive {
                 HStack(spacing: 8) {
                     Image(systemName: "mic.fill")
@@ -230,11 +233,6 @@ struct PanelInputRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 4) {
-            Text(">")
-                .font(.system(size: 13, design: .monospaced))
-                .foregroundColor(.secondary)
-                .padding(.top, 1)
-
             FocusedTextField(
                 text: $viewModel.query,
                 textWidth: $textWidth,
@@ -267,7 +265,7 @@ struct PanelInputRow: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 10)
-        .padding(.vertical, 6)
+        .padding(.vertical, 8)
     }
 }
 
@@ -277,7 +275,7 @@ struct FocusedTextField: NSViewRepresentable {
     @Binding var textHeight: CGFloat
     var onSubmit: () -> Void
     var onKeyDown: ((NSEvent) -> Bool)? = nil
-    var font: NSFont = .monospacedSystemFont(ofSize: 13, weight: .regular)
+    var font: NSFont = .systemFont(ofSize: 13, weight: .regular)
     static let minWidth: CGFloat = 80
     static let maxWidth: CGFloat = 260
     static let maxHeight: CGFloat = 120
@@ -468,7 +466,7 @@ struct FocusedTextField: NSViewRepresentable {
                 max(longestLineWidth + 8, FocusedTextField.minWidth),
                 FocusedTextField.maxWidth
             )
-            let newHeight = min(max(size.height + 4, 18), FocusedTextField.maxHeight)
+            let newHeight = min(max(size.height + 4, 20), FocusedTextField.maxHeight)
             DispatchQueue.main.async {
                 self.textWidth = newWidth
                 self.textHeight = newHeight

@@ -172,6 +172,7 @@ class FloatingPanel: NSPanel {
     private let voiceController = VoiceDictationController()
     private var pendingRealtimeLogStopWorkItem: DispatchWorkItem?
     private var mouseShakeDetector = MouseShakeDetector()
+    private var safeTriangleApex: NSPoint?
     private var invokeHoldBehavior: InvokeHoldBehavior?
     private var cancellables = Set<AnyCancellable>()
     private(set) var taskStartedAt: Date?
@@ -310,6 +311,8 @@ class FloatingPanel: NSPanel {
         }
         searchViewModel.onContentSizeChange = { [weak self] size in
             self?.resizeToContentSize(size, preserveTopEdge: true)
+            // SwiftUI layout may settle over multiple frames; ensure we stay on-screen.
+            DispatchQueue.main.async { self?.clampFrameToScreen() }
         }
         voiceController.onStateChange = { [weak self] state in
             switch state {
@@ -811,9 +814,10 @@ class FloatingPanel: NSPanel {
 
         setContentSize(normalizedSize)
 
-        guard preserveTopEdge else { return }
-
-        var nextOrigin = NSPoint(x: previousOriginX, y: previousTop - frame.height)
+        var nextOrigin = NSPoint(
+            x: previousOriginX,
+            y: preserveTopEdge ? previousTop - frame.height : frame.minY
+        )
         if let screen = screen ?? NSScreen.screens.first(where: { $0.visibleFrame.intersects(frame) }) ?? NSScreen.main {
             let visibleFrame = screen.visibleFrame
             nextOrigin.x = max(visibleFrame.minX, min(nextOrigin.x, visibleFrame.maxX - frame.width))
@@ -821,6 +825,19 @@ class FloatingPanel: NSPanel {
         }
 
         setFrameOrigin(nextOrigin)
+    }
+
+    /// Ensures the panel frame is fully within the visible area of its screen.
+    private func clampFrameToScreen() {
+        guard isVisible, !isTerminalMode else { return }
+        guard let screen = screen ?? NSScreen.screens.first(where: { $0.visibleFrame.intersects(frame) }) ?? NSScreen.main else { return }
+        let sf = screen.visibleFrame
+        var origin = frame.origin
+        origin.x = max(sf.minX, min(origin.x, sf.maxX - frame.width))
+        origin.y = max(sf.minY, min(origin.y, sf.maxY - frame.height))
+        if origin != frame.origin {
+            setFrameOrigin(origin)
+        }
     }
 
     // MARK: - Command key mode
@@ -883,27 +900,41 @@ class FloatingPanel: NSPanel {
 
         stopVoiceModeIfNeeded()
 
+        // Record where the cursor is now — this becomes the apex of the safe triangle.
+        safeTriangleApex = NSEvent.mouseLocation
+
         // Show input row if it was hidden
         if searchViewModel.isCommandKeyMode {
             searchViewModel.isCommandKeyMode = false
             prepareForTextInputFocus()
             makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
+
+            // After SwiftUI settles the wider/taller layout, ensure the panel
+            // hasn't expanded off-screen (e.g. cursor was near a screen edge).
+            DispatchQueue.main.async { [weak self] in
+                self?.clampFrameToScreen()
+            }
         }
 
-        // Dismiss when cursor moves (unless the invoke hotkey is held again or a message was sent).
-        // Check actual modifier state rather than tracked flag to handle missed releases.
+        // Dismiss when cursor leaves the panel and its safe triangle zone.
+        // The safe triangle extends from the original cursor position to the
+        // panel corners, making it forgiving to move diagonally toward the panel.
         globalMouseMonitor = NSEvent.addGlobalMonitorForEvents(matching: .mouseMoved) { [weak self] _ in
             guard let self,
                   !InvokeHotKey.stored().isPressed(in: NSEvent.modifierFlags),
                   !self.searchViewModel.isChatMode else { return }
-            self.dismiss()
+            if !self.isCursorInSafeZone(NSEvent.mouseLocation) {
+                self.dismiss()
+            }
         }
         localMouseMonitor = NSEvent.addLocalMonitorForEvents(matching: .mouseMoved) { [weak self] event in
             guard let self,
                   !InvokeHotKey.stored().isPressed(in: NSEvent.modifierFlags),
                   !self.searchViewModel.isChatMode else { return event }
-            self.dismiss()
+            if !self.isCursorInSafeZone(NSEvent.mouseLocation) {
+                self.dismiss()
+            }
             return event
         }
         invokeHoldBehavior = nil
@@ -971,6 +1002,67 @@ class FloatingPanel: NSPanel {
         searchViewModel.updateHoveredApp()
     }
 
+    /// Returns true when the cursor is inside the panel frame (with padding) or
+    /// inside a triangular "safe zone" that extends from the original cursor
+    /// position (apex) to the two closest corners of the panel.  This prevents
+    /// the panel from dismissing when the user moves diagonally toward it.
+    private func isCursorInSafeZone(_ cursor: NSPoint) -> Bool {
+        let padding: CGFloat = 8
+        let paddedFrame = frame.insetBy(dx: -padding, dy: -padding)
+        if paddedFrame.contains(cursor) { return true }
+
+        guard let apex = safeTriangleApex else { return false }
+
+        // Build a triangle from the apex to the two panel corners nearest to it.
+        let corners = [
+            NSPoint(x: frame.minX, y: frame.minY),
+            NSPoint(x: frame.maxX, y: frame.minY),
+            NSPoint(x: frame.maxX, y: frame.maxY),
+            NSPoint(x: frame.minX, y: frame.maxY),
+        ]
+
+        // Try all corner pairs and keep the triangle that contains the panel center.
+        let panelCenter = NSPoint(x: frame.midX, y: frame.midY)
+        for i in 0..<corners.count {
+            for j in (i + 1)..<corners.count {
+                let a = apex, b = corners[i], c = corners[j]
+                if pointInTriangle(panelCenter, a, b, c) {
+                    // Add padding by expanding the triangle slightly
+                    let expandedB = expandPoint(b, from: a, by: padding)
+                    let expandedC = expandPoint(c, from: a, by: padding)
+                    if pointInTriangle(cursor, a, expandedB, expandedC) {
+                        return true
+                    }
+                }
+            }
+        }
+        return false
+    }
+
+    private func expandPoint(_ point: NSPoint, from origin: NSPoint, by amount: CGFloat) -> NSPoint {
+        let dx = point.x - origin.x
+        let dy = point.y - origin.y
+        let length = hypot(dx, dy)
+        guard length > 0 else { return point }
+        return NSPoint(
+            x: point.x + (dx / length) * amount,
+            y: point.y + (dy / length) * amount
+        )
+    }
+
+    private func pointInTriangle(_ p: NSPoint, _ a: NSPoint, _ b: NSPoint, _ c: NSPoint) -> Bool {
+        let d1 = sign(p, a, b)
+        let d2 = sign(p, b, c)
+        let d3 = sign(p, c, a)
+        let hasNeg = (d1 < 0) || (d2 < 0) || (d3 < 0)
+        let hasPos = (d1 > 0) || (d2 > 0) || (d3 > 0)
+        return !(hasNeg && hasPos)
+    }
+
+    private func sign(_ p1: NSPoint, _ p2: NSPoint, _ p3: NSPoint) -> CGFloat {
+        (p1.x - p3.x) * (p2.y - p3.y) - (p2.x - p3.x) * (p1.y - p3.y)
+    }
+
     private func removeAllMonitors() {
         for monitor in [
             globalMouseMonitor,
@@ -1028,6 +1120,7 @@ class FloatingPanel: NSPanel {
         isCommandKeyVisible = false
         isCursorFollowing = false
         invokeHoldBehavior = nil
+        safeTriangleApex = nil
         currentModifierFlags = []
         isCommandKeyHeld = false
         preservesTaskHistory = false
@@ -1070,6 +1163,7 @@ class FloatingPanel: NSPanel {
         isCommandKeyVisible = false
         isCursorFollowing = false
         invokeHoldBehavior = nil
+        safeTriangleApex = nil
         currentModifierFlags = []
         isCommandKeyHeld = false
         notifyTaskStateChanged()
