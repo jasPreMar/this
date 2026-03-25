@@ -315,6 +315,40 @@ class SearchViewModel: ObservableObject {
         var result = AXUIElementCopyElementAtPosition(systemWide, Float(cgPoint.x), Float(cgPoint.y), &element)
 
         guard result == .success, let rawElement = element else {
+            // Accessibility API returned nothing — check if cursor is over the desktop
+            if isCursorOverDesktop(at: cgPoint) {
+                let description = "Finder → desktop"
+                if hoveredApp != description {
+                    hoveredApp = description
+                    hoveredParts = ["Finder", "desktop"]
+                }
+                // Set Finder's icon
+                if let finder = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.finder").first {
+                    hoveredAppPID = finder.processIdentifier
+                    hoveredContextIcon = finder.icon
+                } else {
+                    hoveredContextIcon = nil
+                }
+                hoveredElementFrame = nil
+                hoveredWindowFrame = nil
+                hoveredWorkingDirectoryURL = nil
+                consecutiveContainerResults = 0
+                lastContainerRole = ""
+                let snapshot = HoverSnapshot(
+                    timestamp: Date(),
+                    processID: hoveredAppPID,
+                    description: description,
+                    parts: hoveredParts,
+                    selectedText: selectedText,
+                    elementFrame: nil,
+                    windowFrame: nil,
+                    screenPoint: hoveredScreenPoint,
+                    workingDirectoryURL: nil
+                )
+                onHoverSnapshotUpdated?(snapshot)
+                return snapshot
+            }
+
             hoveredApp = ""
             hoveredParts = []
             hoveredContextIcon = nil
@@ -462,6 +496,38 @@ class SearchViewModel: ObservableObject {
         return s
     }()
 
+    /// Check if the cursor is over the desktop (no app window under it).
+    private func isCursorOverDesktop(at point: CGPoint) -> Bool {
+        guard let windowList = CGWindowListCopyWindowInfo(
+            [.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID
+        ) as? [[String: Any]] else {
+            return false
+        }
+
+        for window in windowList {
+            // Skip our own app
+            guard let ownerPID = window[kCGWindowOwnerPID as String] as? pid_t,
+                  ownerPID != ProcessInfo.processInfo.processIdentifier else { continue }
+
+            // Skip windows with no bounds or zero-area windows
+            guard let boundsDict = window[kCGWindowBounds as String] as? [String: CGFloat],
+                  let x = boundsDict["X"], let y = boundsDict["Y"],
+                  let w = boundsDict["Width"], let h = boundsDict["Height"],
+                  w > 0, h > 0 else { continue }
+
+            // Skip windows at very negative layer numbers (e.g., wallpaper, desktop icons layer)
+            let layer = window[kCGWindowLayer as String] as? Int ?? 0
+            if layer < 0 { continue }
+
+            let frame = CGRect(x: x, y: y, width: w, height: h)
+            if frame.contains(point) {
+                return false // Cursor is over an app window
+            }
+        }
+
+        return true // No app window under cursor — it's the desktop
+    }
+
     /// Walk up from the leaf element to find the most meaningful ancestor.
     private func resolveElement(_ element: AXUIElement) -> (primary: AXUIElement, ancestors: [AXUIElement]) {
         let leafRole = axValue(element, key: kAXRoleAttribute) as? String ?? ""
@@ -540,14 +606,16 @@ class SearchViewModel: ObservableObject {
     }
 
     /// Search children of a container for a more specific primary-role element.
-    /// Caps recursion at 3 levels to avoid performance issues.
+    /// Caps recursion at 5 levels to handle deeply nested Electron accessibility trees.
     private func findBestChild(in container: AXUIElement, depth: Int = 0) -> AXUIElement? {
-        guard depth < 3,
+        guard depth < 5,
               let children = axValue(container, key: kAXChildrenAttribute) as? [AXUIElement]
         else { return nil }
 
+        let limit = 30
+
         // First pass: look for a direct child with a primary role
-        for child in children.prefix(20) {
+        for child in children.prefix(limit) {
             let role = axValue(child, key: kAXRoleAttribute) as? String ?? ""
             if primaryRoles.contains(role) {
                 return child
@@ -555,7 +623,7 @@ class SearchViewModel: ObservableObject {
         }
 
         // Second pass: recurse into container children
-        for child in children.prefix(20) {
+        for child in children.prefix(limit) {
             let role = axValue(child, key: kAXRoleAttribute) as? String ?? ""
             if containerRoles.contains(role) {
                 if let found = findBestChild(in: child, depth: depth + 1) {
