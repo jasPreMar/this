@@ -17,16 +17,7 @@ struct OnboardingView: View {
             footer
         }
         .frame(width: 618, height: 768)
-        .background(
-            LinearGradient(
-                colors: [
-                    Color.white,
-                    Color(red: 0.985, green: 0.985, blue: 0.99)
-                ],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-        )
+        .background(Color(NSColor.windowBackgroundColor))
     }
 
     @ViewBuilder
@@ -872,11 +863,11 @@ private struct PermissionGrantButtonStyle: ButtonStyle {
 private extension View {
     func cardStyle() -> some View {
         self
-            .background(Color.white.opacity(0.96))
+            .background(Color(NSColor.controlBackgroundColor))
             .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 24, style: .continuous)
-                    .stroke(Color.black.opacity(0.035), lineWidth: 1)
+                    .stroke(Color.primary.opacity(0.06), lineWidth: 1)
             )
             .shadow(color: Color.black.opacity(0.06), radius: 28, y: 10)
     }
