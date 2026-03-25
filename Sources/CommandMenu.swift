@@ -30,30 +30,6 @@ final class CommandMenuPanel: NSPanel {
     }
 
     override func sendEvent(_ event: NSEvent) {
-        if event.type == .leftMouseDown {
-            cancelPendingDrag()
-            let hit = contentView?.hitTest(event.locationInWindow)
-            if !isScrollOrTextInput(hit) {
-                pendingDragEvent = event
-                dragStartMonitor = NSEvent.addLocalMonitorForEvents(
-                    matching: [.leftMouseDragged, .leftMouseUp]
-                ) { [weak self] nextEvent in
-                    guard let self else { return nextEvent }
-                    if nextEvent.type == .leftMouseDragged,
-                       let original = self.pendingDragEvent {
-                        self.cancelPendingDrag()
-                        self.performDrag(with: original)
-                        self.snapBackIfNeeded()
-                        return nil
-                    }
-                    if nextEvent.type == .leftMouseUp {
-                        self.cancelPendingDrag()
-                    }
-                    return nextEvent
-                }
-            }
-        }
-
         super.sendEvent(event)
     }
 
@@ -89,17 +65,8 @@ final class CommandMenuPanel: NSPanel {
 
         isOpaque = false
         backgroundColor = .clear
-
-        if let glass = glassEffectView ?? NativeGlass.makeView(cornerRadius: Self.nativeGlassCornerRadius) {
-            NativeGlass.attach(contentView: hostingView, to: glass)
-            NativeGlass.updateCornerRadius(Self.nativeGlassCornerRadius, on: glass)
-            glassEffectView = glass
-            contentView = glass
-            hasShadow = true
-        } else {
-            contentView = hostingView
-            hasShadow = true
-        }
+        contentView = hostingView
+        hasShadow = true
     }
 
     private func snapBackIfNeeded() {
@@ -115,22 +82,6 @@ final class CommandMenuPanel: NSPanel {
         }
     }
 
-    private func isScrollOrTextInput(_ view: NSView?) -> Bool {
-        var currentView = view
-        while let view = currentView {
-            if view is FocusedTextField.InputScrollView || view is NSTextView {
-                return true
-            }
-            if view.enclosingScrollView is FocusedTextField.InputScrollView {
-                return true
-            }
-            if view is NSScrollView {
-                return true
-            }
-            currentView = view.superview
-        }
-        return false
-    }
 }
 
 struct CommandMenuView: View {
@@ -143,17 +94,19 @@ struct CommandMenuView: View {
 
 
     @ObservedObject var appDelegate: AppDelegate
+    let presentationID: UUID
     @State private var query = ""
     @State private var selectedTaskID: TaskSessionRecord.ID?
     @State private var hoveredTaskID: TaskSessionRecord.ID?
     @State private var hoverSelectionEnabled = false
+    @State private var boundaryExitDirection: Int?
     @State private var textWidth: CGFloat = FocusedTextField.minWidth
     @State private var textHeight: CGFloat = 20
     @State private var inputRowHeight: CGFloat = Self.fallbackInputRowHeight
     @State private var bottomBarHeight: CGFloat = Self.fallbackBottomBarHeight
 
     private var usesNativeGlassSurface: Bool {
-        NativeGlass.isSupported
+        false
     }
 
     private var sortedTasks: [TaskSessionRecord] {
@@ -163,6 +116,10 @@ struct CommandMenuView: View {
             }
             return lhs.lastActivityAt > rhs.lastActivityAt
         }
+    }
+
+    private var displayedTasks: [TaskSessionRecord] {
+        sortedTasks.reversed()
     }
 
     private var selectedTask: TaskSessionRecord? {
@@ -231,31 +188,52 @@ struct CommandMenuView: View {
         max(Self.maxPanelHeight - chromeHeight, 0)
     }
 
+    private var targetTaskSectionHeight: CGFloat {
+        maxTaskSectionHeight / 2
+    }
+
+    private var listSectionHeight: CGFloat {
+        hasVisibleList ? targetTaskSectionHeight : 0
+    }
+
+    private var desiredPanelHeight: CGFloat {
+        if appDelegate.commandMenuChatRecord != nil {
+            Self.maxPanelHeight
+        } else {
+            chromeHeight + listSectionHeight
+        }
+    }
+
     var body: some View {
-        Group {
-            if let chatRecord = appDelegate.commandMenuChatRecord,
-               let viewModel = chatRecord.panel?.searchViewModel {
-                CommandMenuChatDetailView(
-                    task: chatRecord,
-                    viewModel: viewModel,
-                    onBack: { appDelegate.handleCommandMenuBackNavigation() }
-                )
-            } else {
-                taskListContent
+        ZStack(alignment: .bottom) {
+            Group {
+                if let chatRecord = appDelegate.commandMenuChatRecord,
+                   let viewModel = chatRecord.panel?.searchViewModel {
+                    CommandMenuChatDetailView(
+                        task: chatRecord,
+                        viewModel: viewModel,
+                        onBack: { appDelegate.handleCommandMenuBackNavigation() }
+                    )
+                } else {
+                    taskListContent
+                }
             }
         }
+        .id(presentationID)
         .frame(width: Self.panelWidth)
-        .reportHeight(CommandMenuTaskListContentHeightPreferenceKey.self)
+        .frame(maxHeight: .infinity, alignment: .bottom)
         .modifier(CommandMenuSurfaceChrome(usesNativeGlassSurface: usesNativeGlassSurface))
-        .onPreferenceChange(CommandMenuTaskListContentHeightPreferenceKey.self) { height in
-            guard height > 0 else { return }
-            appDelegate.updateCommandMenuSize(CGSize(width: Self.panelWidth, height: height))
+        .onAppear {
+            syncPanelSize()
+        }
+        .onChange(of: desiredPanelHeight) { _, _ in
+            syncPanelSize()
         }
     }
 
     private var taskListContent: some View {
         VStack(spacing: 0) {
-            inputRow
+            bottomBar
 
             Divider()
 
@@ -263,7 +241,7 @@ struct CommandMenuView: View {
                 ScrollViewReader { proxy in
                     ScrollView {
                         VStack(spacing: 0) {
-                            ForEach(sortedTasks) { task in
+                            ForEach(displayedTasks) { task in
                                 CommandMenuTaskRow(
                                     task: task,
                                     isSelected: task.id == selectedTaskID,
@@ -277,19 +255,32 @@ struct CommandMenuView: View {
                         }
                         .padding(.vertical, Self.taskListVerticalPadding)
                     }
+                    .onAppear {
+                        guard let bottomTaskID = displayedTasks.last?.id else { return }
+                        DispatchQueue.main.async {
+                            proxy.scrollTo(bottomTaskID, anchor: .bottom)
+                        }
+                    }
                     .onChange(of: selectedTaskID) { _, newID in
                         guard let newID else { return }
                         withAnimation(.easeOut(duration: 0.12)) {
                             proxy.scrollTo(newID, anchor: .center)
                         }
                     }
+                    .onChange(of: displayedTasks.map(\.id)) { _, _ in
+                        guard selectedTaskID == nil,
+                              let bottomTaskID = displayedTasks.last?.id else { return }
+                        DispatchQueue.main.async {
+                            proxy.scrollTo(bottomTaskID, anchor: .bottom)
+                        }
+                    }
                 }
-                .frame(maxHeight: maxTaskSectionHeight)
+                .frame(height: listSectionHeight, alignment: .top)
 
                 Divider()
             }
 
-            bottomBar
+            inputRow
         }
         .onAppear {
             hoverSelectionEnabled = false
@@ -306,42 +297,21 @@ struct CommandMenuView: View {
         }
         .onChange(of: queryIsEmpty) { _, _ in
             selectedTaskID = nil
+            boundaryExitDirection = nil
         }
     }
 
     private var inputRow: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 16, weight: .medium))
-                .foregroundStyle(.secondary)
-
-            ZStack(alignment: .leading) {
-                if query.isEmpty {
-                    Text("Start a new task from your Home folder...")
-                        .font(.system(size: 17))
-                        .foregroundStyle(.secondary)
-                        .allowsHitTesting(false)
-                }
-
-                FocusedTextField(
-                    text: $query,
-                    textWidth: $textWidth,
-                    textHeight: $textHeight,
-                    onSubmit: submitInput,
-                    onKeyDown: handleInputKeyDown,
-                    font: .systemFont(ofSize: 17, weight: .regular)
-                )
-                .frame(height: max(textHeight, 22))
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-
-            VoiceTrailingIndicator(
-                state: appDelegate.commandMenuVoiceState,
-                level: appDelegate.commandMenuVoiceLevel
-            )
-        }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 16)
+        CommandMenuTextInputRow(
+            text: $query,
+            textWidth: $textWidth,
+            textHeight: $textHeight,
+            placeholder: "Start a new task from your Home folder...",
+            voiceState: appDelegate.commandMenuVoiceState,
+            voiceLevel: appDelegate.commandMenuVoiceLevel,
+            onSubmit: submitInput,
+            onKeyDown: handleInputKeyDown
+        )
         .reportHeight(CommandMenuInputRowHeightPreferenceKey.self)
         .onPreferenceChange(CommandMenuInputRowHeightPreferenceKey.self) { height in
             guard height > 0 else { return }
@@ -382,6 +352,16 @@ struct CommandMenuView: View {
                 query = ""
             }
         }
+    }
+
+    private func syncPanelSize() {
+        guard desiredPanelHeight > 0 else { return }
+        appDelegate.updateCommandMenuSize(
+            CGSize(
+                width: Self.panelWidth,
+                height: ceil(desiredPanelHeight)
+            )
+        )
     }
 
     private func handleInputKeyDown(_ event: NSEvent) -> Bool {
@@ -453,19 +433,32 @@ struct CommandMenuView: View {
     }
 
     private func selectFirstTaskIfNeeded() {
-        selectedTaskID = sortedTasks.first?.id
+        selectedTaskID = displayedTasks.last?.id
+        boundaryExitDirection = nil
     }
 
     private func moveTaskSelection(by delta: Int) {
-        guard !sortedTasks.isEmpty else { return }
+        guard !displayedTasks.isEmpty else { return }
         guard let currentSelectionID = selectedTaskID,
-              let currentIndex = sortedTasks.firstIndex(where: { $0.id == currentSelectionID }) else {
-            selectFirstTaskIfNeeded()
+              let currentIndex = displayedTasks.firstIndex(where: { $0.id == currentSelectionID }) else {
+            if boundaryExitDirection == delta {
+                return
+            }
+            selectedTaskID = delta < 0 ? displayedTasks.last?.id : displayedTasks.first?.id
+            boundaryExitDirection = nil
             return
         }
 
-        let nextIndex = min(max(currentIndex + delta, 0), sortedTasks.count - 1)
-        selectedTaskID = sortedTasks[nextIndex].id
+        if (delta < 0 && currentIndex == 0) ||
+            (delta > 0 && currentIndex == displayedTasks.count - 1) {
+            selectedTaskID = nil
+            boundaryExitDirection = delta
+            return
+        }
+
+        let nextIndex = min(max(currentIndex + delta, 0), displayedTasks.count - 1)
+        selectedTaskID = displayedTasks[nextIndex].id
+        boundaryExitDirection = nil
     }
 
     private func openSelectedTask() {
@@ -514,6 +507,7 @@ private struct CommandMenuSurfaceChrome: ViewModifier {
     func body(content: Content) -> some View {
         if usesNativeGlassSurface {
             content
+                .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
         } else {
             content
                 .background(.regularMaterial)
@@ -659,11 +653,16 @@ private struct CommandMenuChatDetailView: View {
 
             Divider()
 
-            PanelInputRow(
-                viewModel: viewModel,
+            CommandMenuTextInputRow(
+                text: $viewModel.query,
                 textWidth: $chatTextWidth,
                 textHeight: $chatTextHeight,
-                expandsTextField: true
+                placeholder: "Message this task...",
+                voiceState: viewModel.voiceState,
+                voiceLevel: viewModel.voiceLevel,
+                onSubmit: {
+                    viewModel.submitMessage()
+                }
             )
         }
         .frame(height: 520)
@@ -719,6 +718,52 @@ private struct CommandMenuChatDetailView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
+    }
+}
+
+private struct CommandMenuTextInputRow: View {
+    @Binding var text: String
+    @Binding var textWidth: CGFloat
+    @Binding var textHeight: CGFloat
+    let placeholder: String
+    let voiceState: SearchViewModel.VoiceState
+    let voiceLevel: CGFloat
+    let onSubmit: () -> Void
+    var onKeyDown: ((NSEvent) -> Bool)? = nil
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(.secondary)
+
+            ZStack(alignment: .leading) {
+                if text.isEmpty {
+                    Text(placeholder)
+                        .font(.system(size: 17))
+                        .foregroundStyle(.secondary)
+                        .allowsHitTesting(false)
+                }
+
+                FocusedTextField(
+                    text: $text,
+                    textWidth: $textWidth,
+                    textHeight: $textHeight,
+                    onSubmit: onSubmit,
+                    onKeyDown: onKeyDown,
+                    font: .systemFont(ofSize: 17, weight: .regular)
+                )
+                .frame(height: max(textHeight, 22))
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            VoiceTrailingIndicator(
+                state: voiceState,
+                level: voiceLevel
+            )
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 16)
     }
 }
 
@@ -879,14 +924,6 @@ private struct CommandMenuInputRowHeightPreferenceKey: PreferenceKey {
 }
 
 private struct CommandMenuBottomBarHeightPreferenceKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = nextValue()
-    }
-}
-
-private struct CommandMenuTaskListContentHeightPreferenceKey: PreferenceKey {
     static var defaultValue: CGFloat = 0
 
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {

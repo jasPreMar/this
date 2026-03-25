@@ -97,6 +97,10 @@ private func commandMenuCarbonHotKeyHandler(
 }
 
 class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
+    private static let commandMenuPanelWidth: CGFloat = 720
+    private static let commandMenuExpandedHeight: CGFloat = 520
+    private static let commandMenuCollapsedHeight: CGFloat = 104
+
     fileprivate enum CommandMenuPresentationSource {
         case statusItem
         case invokeHotKey
@@ -114,6 +118,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     private var statusItem: NSStatusItem?
     private var legacyStatusMenu: NSMenu?
     private var commandMenuPanel: CommandMenuPanel?
+    private var commandMenuPresentationSource: CommandMenuPresentationSource?
+    private var commandMenuPresentationID = UUID()
     private var commandMenuGlobalMouseMonitor: Any?
     private var commandMenuLocalMouseMonitor: Any?
     private var onboardingWindow: NSWindow?
@@ -622,10 +628,17 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
 
     private func showCommandMenu(from source: CommandMenuPresentationSource, navigateToChat: TaskSessionRecord? = nil) {
         setCommandMenuChatRecord(resolvedCommandMenuChatRecord(preferred: navigateToChat))
+        commandMenuPresentationSource = source
+        commandMenuPresentationID = UUID()
 
         if commandMenuPanel == nil {
             let panel = CommandMenuPanel(
-                contentRect: NSRect(x: 0, y: 0, width: 720, height: 520),
+                contentRect: NSRect(
+                    x: 0,
+                    y: 0,
+                    width: Self.commandMenuPanelWidth,
+                    height: Self.commandMenuCollapsedHeight
+                ),
                 styleMask: [.borderless, .fullSizeContentView],
                 backing: .buffered,
                 defer: false
@@ -649,7 +662,24 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         }
         commandMenuPanel?.level = commandMenuLevel(for: source)
         commandMenuPanel?.collectionBehavior = commandMenuCollectionBehavior(for: source)
-        commandMenuPanel?.setRootView(CommandMenuView(appDelegate: self))
+        commandMenuPanel?.setRootView(
+            CommandMenuView(
+                appDelegate: self,
+                presentationID: commandMenuPresentationID
+            )
+        )
+        let initialCommandMenuHeight = commandMenuChatRecord == nil
+            ? Self.commandMenuCollapsedHeight
+            : Self.commandMenuExpandedHeight
+        commandMenuPanel?.setFrame(
+            NSRect(
+                x: commandMenuPanel?.frame.minX ?? 0,
+                y: commandMenuPanel?.frame.minY ?? 0,
+                width: Self.commandMenuPanelWidth,
+                height: initialCommandMenuHeight
+            ),
+            display: false
+        )
         positionCommandMenu(for: source)
         installCommandMenuEventMonitors()
         commandMenuPanel?.makeKeyAndOrderFront(nil)
@@ -665,32 +695,24 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         guard abs(panel.frame.width - normalizedSize.width) > 0.5 ||
               abs(panel.frame.height - normalizedSize.height) > 0.5 else { return }
 
-        let previousTop = panel.frame.maxY
-        let previousOriginX = panel.frame.minX
-
-        panel.setContentSize(normalizedSize)
-
-        var nextOrigin = NSPoint(x: previousOriginX, y: previousTop - panel.frame.height)
-        if let screen = panel.screen ?? NSScreen.screens.first(where: { $0.visibleFrame.intersects(panel.frame) }) ?? NSScreen.main {
-            let visibleFrame = screen.visibleFrame
-            nextOrigin.x = max(visibleFrame.minX + 8, min(nextOrigin.x, visibleFrame.maxX - panel.frame.width - 8))
-            nextOrigin.y = max(visibleFrame.minY + 8, min(nextOrigin.y, visibleFrame.maxY - panel.frame.height - 8))
-        }
-
-        panel.setFrameOrigin(nextOrigin)
+        let nextOrigin = commandMenuPresentationSource
+            .flatMap { commandMenuOrigin(for: $0, panelSize: normalizedSize) }
+            ?? panel.frame.origin
+        panel.setFrame(NSRect(origin: nextOrigin, size: normalizedSize), display: false)
     }
 
     private func positionCommandMenu(for source: CommandMenuPresentationSource) {
         guard let panel = commandMenuPanel,
-              let origin = commandMenuOrigin(for: source) else { return }
+              let origin = commandMenuOrigin(for: source, panelSize: panel.frame.size) else { return }
 
         panel.setRestingOrigin(origin, snapBackEnabled: source == .invokeHotKey)
         panel.setFrameOrigin(origin)
     }
 
-    private func commandMenuOrigin(for source: CommandMenuPresentationSource) -> NSPoint? {
-        guard let panel = commandMenuPanel else { return nil }
-
+    private func commandMenuOrigin(
+        for source: CommandMenuPresentationSource,
+        panelSize: CGSize
+    ) -> NSPoint? {
         switch source {
         case .statusItem:
             guard let statusButton = statusItem?.button,
@@ -701,24 +723,24 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             let visibleFrame = targetScreen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? .zero
 
             var origin = NSPoint(
-                x: buttonFrame.midX - panel.frame.width / 2,
-                y: buttonFrame.minY - panel.frame.height - 8
+                x: buttonFrame.midX - panelSize.width / 2,
+                y: buttonFrame.minY - panelSize.height - 8
             )
-            origin.x = max(visibleFrame.minX + 8, min(origin.x, visibleFrame.maxX - panel.frame.width - 8))
-            origin.y = max(visibleFrame.minY + 8, min(origin.y, visibleFrame.maxY - panel.frame.height - 8))
+            origin.x = max(visibleFrame.minX + 8, min(origin.x, visibleFrame.maxX - panelSize.width - 8))
+            origin.y = max(visibleFrame.minY + 8, min(origin.y, visibleFrame.maxY - panelSize.height - 8))
             return origin
 
         case .invokeHotKey:
             let targetScreen = NSScreen.screens.first(where: { $0.frame.contains(NSEvent.mouseLocation) }) ?? NSScreen.main
             let visibleFrame = targetScreen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? .zero
-            let topInset: CGFloat = 88
+            let bottomInset: CGFloat = 24
             let horizontalInset: CGFloat = 8
 
-            let unclampedX = visibleFrame.midX - panel.frame.width / 2
-            let unclampedY = visibleFrame.maxY - panel.frame.height - topInset
+            let unclampedX = visibleFrame.midX - panelSize.width / 2
+            let unclampedY = visibleFrame.minY + bottomInset
             return NSPoint(
-                x: max(visibleFrame.minX + horizontalInset, min(unclampedX, visibleFrame.maxX - panel.frame.width - horizontalInset)),
-                y: max(visibleFrame.minY + horizontalInset, min(unclampedY, visibleFrame.maxY - panel.frame.height - horizontalInset))
+                x: max(visibleFrame.minX + horizontalInset, min(unclampedX, visibleFrame.maxX - panelSize.width - horizontalInset)),
+                y: max(visibleFrame.minY + horizontalInset, min(unclampedY, visibleFrame.maxY - panelSize.height - horizontalInset))
             )
         }
     }
@@ -1071,6 +1093,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         tearDownCommandMenuEventMonitors()
         statusItem?.button?.highlight(false)
         commandMenuPanel?.orderOut(nil)
+        commandMenuPanel = nil
+        commandMenuPresentationSource = nil
     }
 
     func handleCommandMenuBackNavigation() {
