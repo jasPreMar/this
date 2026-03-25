@@ -2,7 +2,7 @@ import AppKit
 
 /// Preloads PTT chime sounds into memory so playback is instantaneous.
 class PTTSoundPlayer {
-    private static let resourceBundleName = "HyperPointer_HyperPointer"
+    private static let resourceBundleName = "This_This"
     private let pressSound: NSSound?
     private let releaseSound: NSSound?
     private let ghostCursorClickSound: NSSound?

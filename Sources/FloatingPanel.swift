@@ -442,7 +442,7 @@ class FloatingPanel: NSPanel {
     func hoverSnapshot(at mouseLocation: CGPoint) -> HoverSnapshot? {
         guard isVisible, frame.contains(mouseLocation) else { return nil }
 
-        let appName = Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String ?? "HyperPointer"
+        let appName = Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String ?? "This"
         let target = isTypingInputActive ? "text field" : "panel"
         let workingDirectoryURL = searchViewModel.currentSessionWorkingDirectoryURL ?? searchViewModel.hoveredWorkingDirectoryURL
 

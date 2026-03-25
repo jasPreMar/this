@@ -3,13 +3,13 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleDisplayName</key>
-	<string>HyperPointer</string>
+	<string>This</string>
 	<key>CFBundleExecutable</key>
-	<string>HyperPointer</string>
+	<string>This</string>
 	<key>CFBundleIdentifier</key>
-	<string>com.hyperpointer.app</string>
+	<string>do.this.app</string>
 	<key>CFBundleName</key>
-	<string>HyperPointer</string>
+	<string>This</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
@@ -19,23 +19,23 @@
 	<key>LSUIElement</key>
 	<true/>
 	<key>NSAppleEventsUsageDescription</key>
-	<string>HyperPointer uses AppleScript to automate apps on your Mac when you ask it to perform tasks.</string>
+	<string>This uses AppleScript to automate apps on your Mac when you ask it to perform tasks.</string>
 	<key>NSCalendarsUsageDescription</key>
-	<string>HyperPointer can read and create calendar events when you ask it to manage your schedule.</string>
+	<string>This can read and create calendar events when you ask it to manage your schedule.</string>
 	<key>NSContactsUsageDescription</key>
-	<string>HyperPointer can look up contacts when you ask it to help with people-related tasks.</string>
+	<string>This can look up contacts when you ask it to help with people-related tasks.</string>
 	<key>NSDesktopFolderUsageDescription</key>
-	<string>HyperPointer may access your Desktop folder to help with file management tasks.</string>
+	<string>This may access your Desktop folder to help with file management tasks.</string>
 	<key>NSDocumentsFolderUsageDescription</key>
-	<string>HyperPointer may access your Documents folder to help with file management tasks.</string>
+	<string>This may access your Documents folder to help with file management tasks.</string>
 	<key>NSDownloadsFolderUsageDescription</key>
-	<string>HyperPointer may access your Downloads folder to help with file management tasks.</string>
+	<string>This may access your Downloads folder to help with file management tasks.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>HyperPointer uses your microphone for invoke-key voice input.</string>
+	<string>This uses your microphone for invoke-key voice input.</string>
 	<key>NSRemindersUsageDescription</key>
-	<string>HyperPointer can read and create reminders when you ask it to manage your tasks.</string>
+	<string>This can read and create reminders when you ask it to manage your tasks.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>HyperPointer converts your speech to text so you can dictate prompts hands-free.</string>
+	<string>This converts your speech to text so you can dictate prompts hands-free.</string>
 	<key>SUEnableAutomaticChecks</key>
 	<true/>
 	<key>SUFeedURL</key>

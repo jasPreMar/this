@@ -2,7 +2,7 @@
 
 ## Goal
 
-Ship HyperPointer so users see the normal:
+Ship This so users see the normal:
 
 - "This app was downloaded from the Internet. Are you sure you want to open it?"
 
@@ -66,7 +66,7 @@ Build app bundle locally:
 Build DMG from an existing local app:
 
 ```bash
-./scripts/build-dmg.sh --skip-build --app-path dist/HyperPointer.app --sign-mode skip
+./scripts/build-dmg.sh --skip-build --app-path dist/This.app --sign-mode skip
 ```
 
 Developer ID + notarization flow:
@@ -77,19 +77,19 @@ Developer ID + notarization flow:
   --sign-identity "Developer ID Application: Your Name (TEAMID)"
 
 ./scripts/notarize.sh \
-  --path dist/HyperPointer.app \
+  --path dist/This.app \
   --apple-id "you@example.com" \
   --team-id "TEAMID" \
   --password "app-specific-password"
 
 ./scripts/build-dmg.sh \
   --skip-build \
-  --app-path dist/HyperPointer.app \
+  --app-path dist/This.app \
   --sign-mode developer-id \
   --sign-identity "Developer ID Application: Your Name (TEAMID)"
 
 ./scripts/notarize.sh \
-  --path dist/HyperPointer.dmg \
+  --path dist/This.dmg \
   --apple-id "you@example.com" \
   --team-id "TEAMID" \
   --password "app-specific-password"
@@ -97,4 +97,4 @@ Developer ID + notarization flow:
 
 ## One-Line Summary
 
-There is no public shortcut around Apple's process: to move from the malware block to the normal first-open prompt, HyperPointer must ship as a Developer ID signed, notarized, stapled macOS release, and the release pipeline now enforces that path.
+There is no public shortcut around Apple's process: to move from the malware block to the normal first-open prompt, This must ship as a Developer ID signed, notarized, stapled macOS release, and the release pipeline now enforces that path.

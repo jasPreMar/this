@@ -2,8 +2,8 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-APP_NAME="HyperPointer"
-IDENTITY_NAME="HyperPointer Local Development"
+APP_NAME="This"
+IDENTITY_NAME="This Local Development"
 KEYCHAIN_PATH="$HOME/Library/Keychains/login.keychain-db"
 RUN_AFTER_BUILD=0
 OUTPUT_DIR="${DEV_APP_OUTPUT_DIR:-$ROOT_DIR/dist/debug}"
@@ -20,7 +20,7 @@ identity_exists() {
 
 create_local_identity() {
   local tmpdir
-  local export_password="hyperpointer-local-dev"
+  local export_password="this-local-dev"
   tmpdir="$(mktemp -d)"
 
   cat > "$tmpdir/openssl.cnf" <<EOF

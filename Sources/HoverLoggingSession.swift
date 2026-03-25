@@ -92,7 +92,7 @@ struct HoverSnapshot: Equatable {
 }
 
 final class HoverLoggingSession {
-    static let logURL = URL(fileURLWithPath: "/tmp/hyperpointer-hover.log")
+    static let logURL = URL(fileURLWithPath: "/tmp/this-hover.log")
 
     private weak var searchViewModel: SearchViewModel?
     private let onPauseLogged: ((HoverSnapshot) -> Void)?

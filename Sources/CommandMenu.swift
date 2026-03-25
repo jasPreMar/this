@@ -890,7 +890,7 @@ private struct SettingsMenuButton: View {
 
         menu.addItem(.separator())
 
-        let quitItem = NSMenuItem(title: "Quit HyperPointer", action: #selector(MenuActionHandler.performAction(_:)), keyEquivalent: "q")
+        let quitItem = NSMenuItem(title: "Quit This", action: #selector(MenuActionHandler.performAction(_:)), keyEquivalent: "q")
         quitItem.tag = 3
         quitItem.target = handler
         handler.actions[3] = onQuit

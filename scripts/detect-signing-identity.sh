@@ -23,8 +23,8 @@ for pattern in \
   "${SIGN_IDENTITY_PATTERN:-}" \
   "Developer ID Application:" \
   "Apple Development:" \
-  "HyperPointer Local Development" \
-  "HyperPointer Dev"
+  "This Local Development" \
+  "This Dev"
 do
   if identity_name="$(extract_identity "$pattern")"; then
     printf '%s\n' "$identity_name"

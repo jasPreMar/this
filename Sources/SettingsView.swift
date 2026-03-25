@@ -152,7 +152,7 @@ private struct GeneralSettingsPane: View {
     var body: some View {
         SettingsPageScaffold(
             title: "General",
-            subtitle: "Choose how HyperPointer wakes up and how much feedback it gives you while you work."
+            subtitle: "Choose how This wakes up and how much feedback it gives you while you work."
         ) {
             VStack(spacing: 14) {
                 invokeHotkeyCard
@@ -169,7 +169,7 @@ private struct GeneralSettingsPane: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Invoke hotkey")
                         .font(.system(size: 15, weight: .semibold))
-                    Text("Choose which modifier key you hold to bring up HyperPointer. Fn is the safest default if you want to avoid clashes with app shortcuts.")
+                    Text("Choose which modifier key you hold to bring up This. Fn is the safest default if you want to avoid clashes with app shortcuts.")
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)
                 }
@@ -297,7 +297,7 @@ private struct ChatSettingsPane: View {
     var body: some View {
         SettingsPageScaffold(
             title: "Chat",
-            subtitle: "Pick the Claude defaults HyperPointer should use whenever it opens a new conversation."
+            subtitle: "Pick the Claude defaults This should use whenever it opens a new conversation."
         ) {
             VStack(spacing: 14) {
                 defaultModelCard
@@ -313,7 +313,7 @@ private struct ChatSettingsPane: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Default model")
                         .font(.system(size: 15, weight: .semibold))
-                    Text("This controls the Claude Code model HyperPointer uses by default, plus whether thinking starts enabled or disabled.")
+                    Text("This controls the Claude Code model This uses by default, plus whether thinking starts enabled or disabled.")
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)
                 }
@@ -397,7 +397,7 @@ private struct PermissionsSettingsPane: View {
     var body: some View {
         SettingsPageScaffold(
             title: "Permissions",
-            subtitle: "These macOS permissions let HyperPointer capture context, support voice input, and access the system services you enable on this Mac."
+            subtitle: "These macOS permissions let This capture context, support voice input, and access the system services you enable on this Mac."
         ) {
             SettingsCard(padding: 0) {
                 VStack(alignment: .leading, spacing: 0) {
@@ -467,7 +467,7 @@ private struct PermissionsSettingsPane: View {
 
                     SettingsPermissionStatusRow(
                         title: "Reminders",
-                        description: "Allow HyperPointer to read or create reminders when needed.",
+                        description: "Allow This to read or create reminders when needed.",
                         icon: "checklist",
                         state: permissionState(
                             isGranted: viewModel.isRemindersGranted,
@@ -483,7 +483,7 @@ private struct PermissionsSettingsPane: View {
 
                     SettingsPermissionStatusRow(
                         title: "Input Monitoring",
-                        description: "Allow HyperPointer to observe input events outside the app when needed.",
+                        description: "Allow This to observe input events outside the app when needed.",
                         icon: "keyboard",
                         state: permissionState(
                             isGranted: viewModel.isInputMonitoringGranted,

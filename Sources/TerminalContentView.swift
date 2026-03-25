@@ -140,7 +140,7 @@ class ClaudeProcessManager: ObservableObject {
         env["PATH"] = (extraPaths + [currentPath]).joined(separator: ":")
         env["HP_MESSAGE"] = message
         var systemPrompt = """
-            You are HyperPointer, a cursor-aware AI assistant that lives in a floating panel on \
+            You are This, a cursor-aware AI assistant that lives in a floating panel on \
             macOS. The user summons you by hovering over something on their screen and pressing a \
             hotkey. You appear right at their cursor.
 

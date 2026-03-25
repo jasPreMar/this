@@ -3,12 +3,12 @@
 # so local builds can keep a stable signature across updates.
 #
 # Usage: ./scripts/create-signing-cert.sh [cert-name]
-#   cert-name defaults to "HyperPointer"
+#   cert-name defaults to "This"
 #
 # After running, add three GitHub repository secrets:
 #   SIGNING_CERT_P12          — contents of the .p12.b64 file printed below
 #   SIGNING_CERT_PASSWORD     — password printed by this script
-#   SIGNING_CERT_NAME         — the cert name (e.g. "HyperPointer")
+#   SIGNING_CERT_NAME         — the cert name (e.g. "This")
 #
 # Why this matters:
 #   Ad-hoc signed apps get a TCC code requirement tied to the binary hash.
@@ -19,7 +19,7 @@
 #   remove Gatekeeper's malware warning on other Macs.
 set -euo pipefail
 
-CERT_NAME="${1:-HyperPointer}"
+CERT_NAME="${1:-This}"
 P12_FILE="${CERT_NAME// /_}.p12"
 B64_FILE="${P12_FILE}.b64"
 PASSWORD=$(openssl rand -base64 18)

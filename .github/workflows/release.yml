@@ -116,7 +116,7 @@ jobs:
           APPLE_TEAM_ID:               ${{ secrets.APPLE_TEAM_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
         run: |
-          ./scripts/notarize.sh --path dist/HyperPointer.app
+          ./scripts/notarize.sh --path dist/This.app
 
       - name: Build DMG
         env:
@@ -124,7 +124,7 @@ jobs:
         run: |
           ./scripts/build-dmg.sh \
             --skip-build \
-            --app-path dist/HyperPointer.app \
+            --app-path dist/This.app \
             --sign-mode developer-id \
             --sign-identity "$SIGN_IDENTITY"
 
@@ -134,12 +134,12 @@ jobs:
           APPLE_TEAM_ID:               ${{ secrets.APPLE_TEAM_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
         run: |
-          ./scripts/notarize.sh --path dist/HyperPointer.dmg
+          ./scripts/notarize.sh --path dist/This.dmg
 
       - name: Collect DMG metadata
         id: dmg
         run: |
-          SIZE=$(stat -f%z dist/HyperPointer.dmg)
+          SIZE=$(stat -f%z dist/This.dmg)
           echo "size=$SIZE" >> $GITHUB_OUTPUT
 
       # -----------------------------------------------------------------------
@@ -168,7 +168,7 @@ jobs:
 
           SIG="$(
             printf '%s' "$SPARKLE_PRIVATE_KEY" \
-              | ./sparkle-tools/bin/sign_update --ed-key-file - -p dist/HyperPointer.dmg
+              | ./sparkle-tools/bin/sign_update --ed-key-file - -p dist/This.dmg
           )"
 
           if [[ -z "$SIG" ]]; then
@@ -196,9 +196,9 @@ jobs:
                xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle"
                xmlns:dc="http://purl.org/dc/elements/1.1/">
             <channel>
-              <title>HyperPointer Updates</title>
+              <title>This Updates</title>
               <link>https://github.com/jasPreMar/hyper-pointer</link>
-              <description>HyperPointer changelog</description>
+              <description>This changelog</description>
               <language>en</language>
               <item>
                 <title>Version ${SHORT}.${BUILD}</title>
@@ -206,7 +206,7 @@ jobs:
                 <sparkle:shortVersionString>${SHORT}.${BUILD}</sparkle:shortVersionString>
                 <pubDate>${PUBDATE}</pubDate>
                 <enclosure
-                  url="https://github.com/jasPreMar/hyper-pointer/releases/download/${TAG}/HyperPointer.dmg"
+                  url="https://github.com/jasPreMar/hyper-pointer/releases/download/${TAG}/This.dmg"
                   length="${SIZE}"
                   type="application/octet-stream"
                   sparkle:edSignature="${SIGNATURE}" />
@@ -228,5 +228,5 @@ jobs:
         with:
           tag_name: ${{ steps.version.outputs.tag }}
           name:     ${{ steps.version.outputs.tag }}
-          files:    dist/HyperPointer.dmg
+          files:    dist/This.dmg
           generate_release_notes: true

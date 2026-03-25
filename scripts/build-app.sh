@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-APP_NAME="HyperPointer"
+APP_NAME="This"
 SCRIPT_NAME="$(basename "$0")"
 CONFIGURATION="${BUILD_CONFIGURATION:-release}"
 DIST_DIR="${DIST_DIR:-$ROOT_DIR/dist}"

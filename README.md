@@ -1,4 +1,4 @@
-# HyperPointer
+# This
 
 ## Problem
 
@@ -32,13 +32,13 @@ This is wby I believe objects should come back into play. By orienting an agent 
 
 ---
 
-## Introducing HyperPointer
+## Introducing This
 
-Hyperpointer lets launch an agent from any object. Objects are anything you point at. You can already point at a file left click to select it. You can double click to open it. You can right click to see a menu of other possible actions, like rename. But now, with hyperpointer, you can point at it, and with your voice, tell it to open, select all contents, copy those contents, and move them to another folder in another part of your drive and duplicated with a slightly different scheme based on that folder's name. You can point at your browser and tell it what website to go to, what to do when you get there, to copy the contents, and bring it back to this other notes application and based the results. 
+This lets you launch an agent from any object. Objects are anything you point at. You can already point at a file left click to select it. You can double click to open it. You can right click to see a menu of other possible actions, like rename. But now, with This, you can point at it, and with your voice, tell it to open, select all contents, copy those contents, and move them to another folder in another part of your drive and duplicated with a slightly different scheme based on that folder's name. You can point at your browser and tell it what website to go to, what to do when you get there, to copy the contents, and bring it back to this other notes application and based the results.
 
-If your cursor is an arrow, clicking is a spear, and hyperpointer is a long bow. Or better yet,  hyperpointer turns your arrow into a fully autonomous drone capable of entire chains of action, and returns to you when it's done.
+If your cursor is an arrow, clicking is a spear, and This is a long bow. Or better yet, This turns your arrow into a fully autonomous drone capable of entire chains of action, and returns to you when it's done.
 
-If hyperpointer is done well, we shouldn't need context menus (right click menus) anymore — except in the case of generated contextual ones that aid the user's need to choose an action. In fact, I'd argue that we don't need static menus at all anymore. You can start from an objecct and ask for anything you want, in plain language, and the system figures out how to do it.
+If This is done well, we shouldn't need context menus (right click menus) anymore — except in the case of generated contextual ones that aid the user's need to choose an action. In fact, I'd argue that we don't need static menus at all anymore. You can start from an objecct and ask for anything you want, in plain language, and the system figures out how to do it.
 
 ---
 
@@ -53,7 +53,7 @@ Normally, using an AI assistant goes like this:
 
 You spend half your effort just describing the context before you can even ask the question.
 
-HyperPointer removes that step:
+This removes that step:
 
 1. **Press `Ctrl+Space`** (or hold `⌘` and move your mouse, or `Cmd+right-click`)
 2. **A floating panel appears** next to your cursor, above every other window
@@ -95,7 +95,7 @@ To install the latest released build from the terminal:
 curl -fsSL https://raw.githubusercontent.com/jasPreMar/hyper-pointer/main/scripts/install.sh | bash
 ```
 
-That downloads the latest DMG from GitHub Releases, installs `HyperPointer.app`, opens it, and launches the onboarding wizard.
+That downloads the latest DMG from GitHub Releases, installs `This.app`, opens it, and launches the onboarding wizard.
 
 To build from source:
 
@@ -103,7 +103,7 @@ To build from source:
 git clone https://github.com/jasPreMar/hyper-pointer.git
 cd hyper-pointer
 make build
-./.build/debug/HyperPointer
+./.build/debug/This
 ```
 
 For permission testing, prefer launching the packaged app bundle instead of the raw binary so macOS sees a stable app path and signing identity:
@@ -116,7 +116,7 @@ To package it as a normal macOS app bundle:
 
 ```bash
 make app
-open dist/HyperPointer.app
+open dist/This.app
 ```
 
 To install the app into `/Applications`:
@@ -136,18 +136,18 @@ To build a drag-to-install disk image:
 
 ```bash
 make dmg
-open dist/HyperPointer.dmg
+open dist/This.dmg
 ```
 
 For local permission persistence across updates, a self-signed identity is enough. For distribution to other Macs, it is not. Gatekeeper's malware warning only goes away when the shipped artifacts are signed with a real `Developer ID Application` certificate, notarized, and stapled.
 
-On first launch, HyperPointer opens an onboarding wizard that walks through:
+On first launch, This opens an onboarding wizard that walks through:
 
 - Installing or verifying Claude CLI
 - Accessibility
 - Screen Recording
 - Optional microphone and speech permissions for invoke-key dictation
-- Optional Automation approvals for the apps you want HyperPointer to control
+- Optional Automation approvals for the apps you want This to control
 
 You can reopen the wizard any time from the menu bar item with `Open Onboarding`.
 
@@ -167,19 +167,19 @@ The `.app` and `.dmg` targets now auto-prefer the best available signing identit
   --sign-identity "Developer ID Application: Your Name (TEAMID)"
 
 ./scripts/notarize.sh \
-  --path dist/HyperPointer.app \
+  --path dist/This.app \
   --apple-id "you@example.com" \
   --team-id "TEAMID" \
   --password "app-specific-password"
 
 ./scripts/build-dmg.sh \
   --skip-build \
-  --app-path dist/HyperPointer.app \
+  --app-path dist/This.app \
   --sign-mode developer-id \
   --sign-identity "Developer ID Application: Your Name (TEAMID)"
 
 ./scripts/notarize.sh \
-  --path dist/HyperPointer.dmg \
+  --path dist/This.dmg \
   --apple-id "you@example.com" \
   --team-id "TEAMID" \
   --password "app-specific-password"
@@ -213,7 +213,7 @@ That command prints the public key to embed in `SUPublicEDKey` inside `Sources/I
 ./.build/artifacts/sparkle/Sparkle/bin/generate_keys -x sparkle-private-key.txt
 ```
 
-Copy the contents of `sparkle-private-key.txt` into the `SPARKLE_PRIVATE_KEY` GitHub secret, then delete the file. The release workflow reads that secret with `sign_update --ed-key-file -`, signs `dist/HyperPointer.dmg`, and writes the resulting signature into `appcast.xml`.
+Copy the contents of `sparkle-private-key.txt` into the `SPARKLE_PRIVATE_KEY` GitHub secret, then delete the file. The release workflow reads that secret with `sign_update --ed-key-file -`, signs `dist/This.dmg`, and writes the resulting signature into `appcast.xml`.
 
 ## Usage
 

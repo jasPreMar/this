@@ -84,12 +84,12 @@ private struct WelcomeStep: View {
 
     var body: some View {
         OnboardingPageScaffold(
-            title: "Welcome to HyperPointer",
-            subtitle: "HyperPointer is a powerful local assistant that reads context from your Mac and helps you act on what is on screen."
+            title: "Welcome to This",
+            subtitle: "This is a powerful local assistant that reads context from your Mac and helps you act on what is on screen."
         ) {
             SecurityNoticeCard(
                 title: "Security notice",
-                message: "The connected AI agent can trigger powerful actions on your Mac, including running commands, reading and writing files, and capturing screenshots depending on the permissions you grant.\n\nOnly enable HyperPointer if you understand the risks and trust the prompts and integrations you use."
+                message: "The connected AI agent can trigger powerful actions on your Mac, including running commands, reading and writing files, and capturing screenshots depending on the permissions you grant.\n\nOnly enable This if you understand the risks and trust the prompts and integrations you use."
             )
         }
     }
@@ -101,7 +101,7 @@ private struct ClaudeSetupStep: View {
     var body: some View {
         OnboardingPageScaffold(
             title: "Choose your setup",
-            subtitle: "HyperPointer works best when Claude CLI is available on this Mac. You can use this Mac now or configure it later."
+            subtitle: "This works best when Claude CLI is available on this Mac. You can use this Mac now or configure it later."
         ) {
             VStack(alignment: .leading, spacing: 0) {
                 SetupChoiceRow(
@@ -151,7 +151,7 @@ private struct PermissionsStep: View {
     var body: some View {
         OnboardingPageScaffold(
             title: "Grant permissions",
-            subtitle: "These macOS permissions let HyperPointer capture context and access the system services you enable on this Mac."
+            subtitle: "These macOS permissions let This capture context and access the system services you enable on this Mac."
         ) {
             VStack(alignment: .leading, spacing: 0) {
                 PermissionStatusRow(
@@ -227,7 +227,7 @@ private struct PermissionsStep: View {
 
                 PermissionStatusRow(
                     title: "Reminders",
-                    description: "Allow HyperPointer to read or create reminders when needed.",
+                    description: "Allow This to read or create reminders when needed.",
                     icon: "checklist",
                     state: permissionState(
                         isGranted: viewModel.isRemindersGranted,
@@ -244,7 +244,7 @@ private struct PermissionsStep: View {
 
                 PermissionStatusRow(
                     title: "Input Monitoring",
-                    description: "Allow HyperPointer to observe input events outside the app when needed.",
+                    description: "Allow This to observe input events outside the app when needed.",
                     icon: "keyboard",
                     state: permissionState(
                         isGranted: viewModel.isInputMonitoringGranted,
@@ -596,7 +596,7 @@ private struct FinishStep: View {
 
     var body: some View {
         OnboardingPageScaffold(
-            title: "Try HyperPointer",
+            title: "Try This",
             subtitle: "Choose your invoke key, then practice the flow before you start using it in real tasks."
         ) {
             VStack(spacing: 16) {
@@ -632,7 +632,7 @@ private struct FinishStep: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text("Invoke hotkey")
                     .font(.system(size: 15, weight: .semibold))
-                Text("Choose which modifier key you hold to bring up HyperPointer. Fn is the safest default if you want to avoid clashes with app shortcuts.")
+                Text("Choose which modifier key you hold to bring up This. Fn is the safest default if you want to avoid clashes with app shortcuts.")
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
             }
@@ -764,7 +764,7 @@ private struct FinishStep: View {
                         .foregroundStyle(.secondary)
                 case .released:
                     if let item = tutorial.selectedItem {
-                        Text("Type in the HyperPointer panel: \"\(item.examplePrompt)\"")
+                        Text("Type in the This panel: \"\(item.examplePrompt)\"")
                             .font(.system(size: 14, weight: .medium))
                         Text("Then press Return to send it to Claude.")
                             .font(.system(size: 12))

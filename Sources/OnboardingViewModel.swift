@@ -448,7 +448,7 @@ final class OnboardingViewModel: ObservableObject {
             OnboardingViewModel.clearPendingPermissionRequest()
             OnboardingViewModel.clearResumeOnLaunch()
             showAppBundlePreparationFailure(
-                message: "Could not locate the package root needed to build HyperPointer.app."
+                message: "Could not locate the package root needed to build This.app."
             )
             return
         }
@@ -484,7 +484,7 @@ final class OnboardingViewModel: ObservableObject {
                     OnboardingViewModel.clearPendingPermissionRequest()
                     OnboardingViewModel.clearResumeOnLaunch()
                     self.showAppBundlePreparationFailure(
-                        message: output.isEmpty ? "Building HyperPointer.app failed." : output
+                        message: output.isEmpty ? "Building This.app failed." : output
                     )
                     return
                 }
@@ -620,7 +620,7 @@ final class OnboardingViewModel: ObservableObject {
     private func showAppBundlePreparationFailure(message: String) {
         let alert = NSAlert()
         alert.alertStyle = .warning
-        alert.messageText = "Could not prepare HyperPointer.app"
+        alert.messageText = "Could not prepare This.app"
         alert.informativeText = message
         alert.addButton(withTitle: "OK")
 

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-APP_NAME="HyperPointer"
+APP_NAME="This"
 SCRIPT_NAME="$(basename "$0")"
 CONFIGURATION="${BUILD_CONFIGURATION:-release}"
 DIST_DIR="${DIST_DIR:-$ROOT_DIR/dist}"
@@ -67,7 +67,7 @@ Options:
   --output-dir <path>              Artifact directory (default: ./dist)
   --app-path <path>                Existing .app bundle to package
   --skip-build                     Reuse the existing app bundle at --app-path
-  --volume-name <name>             Mounted DMG volume name (default: HyperPointer)
+  --volume-name <name>             Mounted DMG volume name (default: This)
   --sign-identity <identity>       macOS signing identity to use for the app build
   --sign-mode <auto|ad-hoc|identity|developer-id|skip>
                                    Signing mode passed through to build-app.sh

@@ -1,8 +1,8 @@
-BINARY    := .build/debug/HyperPointer
-BUNDLE_ID := com.hyperpointer.app
+BINARY    := .build/debug/This
+BUNDLE_ID := do.this.app
 USER_TCC  := $(HOME)/Library/Application Support/com.apple.TCC/TCC.db
-APP_PATH  := dist/HyperPointer.app
-DMG_PATH  := dist/HyperPointer.dmg
+APP_PATH  := dist/This.app
+DMG_PATH  := dist/This.dmg
 
 .PHONY: build run sign app install dmg grant reset-tcc cert-instructions
 
@@ -38,7 +38,7 @@ cert-instructions:
 	@echo ""
 	@echo "  1. Open Keychain Access"
 	@echo "  2. Menu: Keychain Access → Certificate Assistant → Create a Certificate"
-	@echo "  3. Name: HyperPointer Local Development"
+	@echo "  3. Name: This Local Development"
 	@echo "  4. Identity Type: Self Signed Root"
 	@echo "  5. Certificate Type: Code Signing"
 	@echo "  6. Click Create"
@@ -67,7 +67,7 @@ grant:
 	@$(MAKE) --no-print-directory _grant SVC=kTCCServiceAppleEvents   TARGET=com.apple.systempreferences
 	@$(MAKE) --no-print-directory _grant SVC=kTCCServiceScreenCapture TARGET=UNUSED
 	@$(MAKE) --no-print-directory _grant SVC=kTCCServiceAccessibility TARGET=UNUSED
-	@echo "Done. Relaunch HyperPointer — no permission popups."
+	@echo "Done. Relaunch This — no permission popups."
 
 _grant:
 	@sqlite3 "$(USER_TCC)" \

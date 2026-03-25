@@ -1,8 +1,8 @@
 #!/bin/zsh
 set -euo pipefail
 
-APP_NAME="HyperPointer"
-REPO="${HYPERPOINTER_REPO:-jasPreMar/hyper-pointer}"
+APP_NAME="This"
+REPO="${THIS_REPO:-jasPreMar/hyper-pointer}"
 DMG_URL="https://github.com/${REPO}/releases/latest/download/${APP_NAME}.dmg"
 INSTALL_DIR="${INSTALL_DIR:-/Applications}"
 TMP_DIR="$(mktemp -d)"
@@ -57,6 +57,6 @@ cat <<EOF
 Installed ${APP_NAME} to:
   $APP_DEST
 
-On first launch, HyperPointer opens its onboarding wizard to walk through Claude CLI,
+On first launch, This opens its onboarding wizard to walk through Claude CLI,
 Accessibility, Screen Recording, and optional Automation approvals.
 EOF

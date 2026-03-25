@@ -2,14 +2,14 @@ import Foundation
 
 final class RealtimeInputLog {
     static let shared = RealtimeInputLog()
-    static let logURL = URL(fileURLWithPath: "/tmp/hyperpointer-live-input.log")
+    static let logURL = URL(fileURLWithPath: "/tmp/this-live-input.log")
 
     private struct HoverInsertion {
         let offset: Int
         let text: String
     }
 
-    private let queue = DispatchQueue(label: "hyperpointer.realtime-input-log")
+    private let queue = DispatchQueue(label: "do.this.realtime-input-log")
     private var fileHandle: FileHandle?
     private var sessionActive = false
     private var hoverInsertions: [HoverInsertion] = []
