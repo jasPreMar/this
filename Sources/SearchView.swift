@@ -530,9 +530,11 @@ struct ContextSummaryView: View {
                 .scaledToFit()
                 .clipShape(RoundedRectangle(cornerRadius: 4))
         } else {
-            Image(systemName: iconForItem(contextText ?? text))
-                .font(.system(size: 11))
-                .foregroundColor(.secondary)
+            Image(nsImage: NSApp.applicationIconImage)
+                .resizable()
+                .interpolation(.high)
+                .scaledToFit()
+                .clipShape(RoundedRectangle(cornerRadius: 4))
         }
     }
 
