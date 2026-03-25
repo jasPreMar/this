@@ -42,7 +42,7 @@ If This is done well, we shouldn't need context menus (right click menus) anymor
 
 ---
 
-## How it works
+## How This works
 
 Normally, using an AI assistant goes like this:
 
