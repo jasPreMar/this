@@ -368,8 +368,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     private func setupStatusItem() {
         let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         if let button = statusItem.button {
-            if let iconPath = Bundle.main.path(forResource: "StatusBarIcon", ofType: "png"),
-               let iconImage = NSImage(contentsOfFile: iconPath) {
+            if let iconImage = Bundle.main.image(forResource: "StatusBarIcon") {
                 iconImage.isTemplate = true
                 iconImage.size = NSSize(width: 18, height: 18)
                 button.image = iconImage
