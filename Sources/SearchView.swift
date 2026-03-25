@@ -239,6 +239,10 @@ struct PanelInputRow: View {
                 textHeight: $textHeight,
                 onSubmit: {
                     viewModel.submitMessage()
+                },
+                onKeyDown: { event in
+                    let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+                    return event.type == .keyDown && event.keyCode == 12 && flags == [.command]
                 }
             )
             .frame(width: expandsTextField ? nil : textWidth, height: textHeight)
@@ -296,6 +300,13 @@ struct FocusedTextField: NSViewRepresentable {
                 return
             }
             super.keyDown(with: event)
+        }
+
+        override func performKeyEquivalent(with event: NSEvent) -> Bool {
+            if onKeyDown?(event) == true {
+                return true
+            }
+            return super.performKeyEquivalent(with: event)
         }
     }
 

@@ -304,13 +304,14 @@ class SearchViewModel: ObservableObject {
         lastCursorPosition = mouseLocation
         hoveredScreenPoint = mouseLocation
 
+        if let panelSnapshot = selfPanelHoverSnapshot(at: mouseLocation) {
+            consecutiveContainerResults = 0
+            lastContainerRole = ""
+            applyHoverSnapshot(panelSnapshot, icon: NSApp.applicationIconImage)
+            return panelSnapshot
+        }
+
         guard let rawElement = copyElementAtMouseLocation(mouseLocation) else {
-            if let panelSnapshot = selfPanelHoverSnapshot(at: mouseLocation) {
-                consecutiveContainerResults = 0
-                lastContainerRole = ""
-                applyHoverSnapshot(panelSnapshot, icon: NSApp.applicationIconImage)
-                return panelSnapshot
-            }
             if let desktopSnapshot = desktopHoverSnapshot(at: mouseLocation) {
                 consecutiveContainerResults = 0
                 lastContainerRole = ""
