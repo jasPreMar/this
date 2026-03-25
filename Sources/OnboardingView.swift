@@ -342,7 +342,6 @@ private struct OnboardingHero: View {
                 .resizable()
                 .scaledToFit()
                 .frame(width: 96, height: 96)
-                .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
                 .shadow(color: Color.accentColor.opacity(0.24), radius: 24, y: 10)
         }
         .frame(height: 124)
