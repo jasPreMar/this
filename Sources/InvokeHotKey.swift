@@ -68,7 +68,7 @@ enum InvokeHotKey: String, CaseIterable, Identifiable {
     static func stored(in defaults: UserDefaults = .standard) -> InvokeHotKey {
         guard let rawValue = defaults.string(forKey: defaultsKey),
               let hotKey = InvokeHotKey(rawValue: rawValue) else {
-            return .function
+            return .control
         }
         return hotKey
     }
