@@ -155,7 +155,8 @@ struct PanelHeaderSection<Accessory: View>: View {
                     Text(viewModel.selectedText)
                         .font(.system(size: 12))
                         .italic()
-                        .lineLimit(2)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
                         .foregroundColor(.primary)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
