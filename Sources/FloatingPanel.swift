@@ -1106,8 +1106,8 @@ class FloatingPanel: NSPanel {
             return
         }
 
-        // If voice is active (listening or transcribing), just follow — no pause-to-type
-        if searchViewModel.isVoiceModeActive {
+        // If voice has actually transcribed speech, stay in voice mode — just follow
+        if voiceController.hasTranscribedSpeech {
             positionAtCursor(using: mouseLocation)
             searchViewModel.updateHoveredApp()
             return
@@ -1141,13 +1141,13 @@ class FloatingPanel: NSPanel {
     private func resetPinnedPauseTimer() {
         cancelPinnedPauseTimer()
 
-        // Don't start pause timer if voice is active
-        guard !searchViewModel.isVoiceModeActive else { return }
+        // Don't start pause timer if voice has transcribed speech
+        guard !voiceController.hasTranscribedSpeech else { return }
 
         let workItem = DispatchWorkItem { [weak self] in
             guard let self,
                   self.invokeHoldBehavior == .pinnedFollow,
-                  !self.searchViewModel.isVoiceModeActive else { return }
+                  !self.voiceController.hasTranscribedSpeech else { return }
             self.showPinnedInput()
         }
         pinnedPauseWorkItem = workItem
@@ -1161,6 +1161,10 @@ class FloatingPanel: NSPanel {
 
     private func showPinnedInput() {
         guard invokeHoldBehavior == .pinnedFollow else { return }
+        // Stop voice if it's listening but hasn't transcribed anything
+        if searchViewModel.isVoiceModeActive && !voiceController.hasTranscribedSpeech {
+            voiceController.cancel()
+        }
         pinnedInputVisible = true
         searchViewModel.isCommandKeyMode = false
         prepareForTextInputFocus()

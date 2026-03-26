@@ -28,6 +28,7 @@ final class VoiceDictationController {
         }
     }
 
+    private(set) var hasTranscribedSpeech = false
     private var latestTranscript = ""
     private var lastPublishedPartialTranscript = ""
     private var finishWorkItem: DispatchWorkItem?
@@ -103,6 +104,7 @@ final class VoiceDictationController {
         latestTranscript = ""
         lastPublishedPartialTranscript = ""
         hasDeliveredResult = false
+        hasTranscribedSpeech = false
         onLevelChange?(0)
 
         let recognitionRequest = SFSpeechAudioBufferRecognitionRequest()
@@ -118,6 +120,7 @@ final class VoiceDictationController {
 
                 if !self.latestTranscript.isEmpty,
                    self.latestTranscript != self.lastPublishedPartialTranscript {
+                    self.hasTranscribedSpeech = true
                     self.lastPublishedPartialTranscript = self.latestTranscript
                     DispatchQueue.main.async { [latestTranscript = self.latestTranscript, onPartialTranscript = self.onPartialTranscript] in
                         onPartialTranscript?(latestTranscript)
