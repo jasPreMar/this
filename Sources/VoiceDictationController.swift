@@ -105,10 +105,11 @@ final class VoiceDictationController {
         startGeneration &+= 1
         finishWorkItem?.cancel()
         streamTask?.cancel()
-        Task { [weak self] in
-            await self?.streamTranscriber?.stopStreamTranscription()
-        }
+        let transcriber = streamTranscriber
         streamTranscriber = nil
+        Task {
+            await transcriber?.stopStreamTranscription()
+        }
         streamTask = nil
         state = .idle
     }
@@ -131,6 +132,11 @@ final class VoiceDictationController {
                 let kit = try await Self.getOrInitWhisperKit()
                 guard self.startGeneration == generation else { return }
 
+                guard let tokenizer = kit.tokenizer else {
+                    throw NSError(domain: "VoiceDictation", code: -1,
+                                  userInfo: [NSLocalizedDescriptionKey: "Tokenizer failed to load"])
+                }
+
                 let options = DecodingOptions(
                     language: "en",
                     wordTimestamps: false
@@ -141,7 +147,7 @@ final class VoiceDictationController {
                     featureExtractor: kit.featureExtractor,
                     segmentSeeker: kit.segmentSeeker,
                     textDecoder: kit.textDecoder,
-                    tokenizer: kit.tokenizer!,
+                    tokenizer: tokenizer,
                     audioProcessor: kit.audioProcessor,
                     decodingOptions: options,
                     requiredSegmentsForConfirmation: 2,
