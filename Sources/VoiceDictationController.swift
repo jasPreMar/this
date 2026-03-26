@@ -26,6 +26,7 @@ final class VoiceDictationController {
         }
     }
 
+    private(set) var hasTranscribedSpeech = false
     private var latestTranscript = ""
     private var lastPublishedPartialTranscript = ""
     private var finishWorkItem: DispatchWorkItem?
@@ -118,6 +119,7 @@ final class VoiceDictationController {
         latestTranscript = ""
         lastPublishedPartialTranscript = ""
         hasDeliveredResult = false
+        hasTranscribedSpeech = false
         onLevelChange?(0)
 
         let generation = startGeneration
@@ -195,6 +197,7 @@ final class VoiceDictationController {
             let displayText = combined == "Waiting for speech..." ? "" : combined
 
             if !displayText.isEmpty, displayText != self.lastPublishedPartialTranscript {
+                self.hasTranscribedSpeech = true
                 self.latestTranscript = displayText
                 self.lastPublishedPartialTranscript = displayText
                 self.onPartialTranscript?(displayText)
