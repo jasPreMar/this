@@ -195,22 +195,12 @@ struct PanelHeaderSection<Accessory: View>: View {
 
                     Group {
                         switch viewModel.voiceState {
-                        case .listening:
-                            Text("Release \(InvokeHotKey.stored().displayName) to send")
-                                .font(.system(size: 13))
-                                .foregroundColor(.secondary)
+                        case .listening, .idle, .failed:
+                            EmptyView()
                         case .transcribing:
                             Text("Transcribing...")
                                 .font(.system(size: 13))
                                 .foregroundColor(.secondary)
-                        case .failed(let msg):
-                            Text(msg)
-                                .font(.system(size: 13))
-                                .lineLimit(1)
-                                .truncationMode(.tail)
-                                .foregroundColor(.secondary)
-                        case .idle:
-                            EmptyView()
                         }
                     }
 
