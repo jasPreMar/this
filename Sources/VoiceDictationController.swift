@@ -1,6 +1,6 @@
 import AVFoundation
 import Foundation
-import Speech
+import WhisperKit
 
 final class VoiceDictationController {
     enum State: Equatable {
@@ -15,10 +15,8 @@ final class VoiceDictationController {
     var onPartialTranscript: ((String) -> Void)?
     var onTranscript: ((String) -> Void)?
 
-    private let audioEngine = AVAudioEngine()
-    private let speechRecognizer = SFSpeechRecognizer(locale: .autoupdatingCurrent)
-    private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
-    private var recognitionTask: SFSpeechRecognitionTask?
+    private var streamTranscriber: AudioStreamTranscriber?
+    private var streamTask: Task<Void, Never>?
     private var state: State = .idle {
         didSet {
             guard oldValue != state else { return }
@@ -34,20 +32,51 @@ final class VoiceDictationController {
     private var hasDeliveredResult = false
     private var startGeneration: UInt = 0
 
+    // MARK: - Shared WhisperKit instance
+
+    private static var sharedWhisperKit: WhisperKit?
+    private static var initTask: Task<WhisperKit, Error>?
+
+    static func getOrInitWhisperKit() async throws -> WhisperKit {
+        if let existing = sharedWhisperKit { return existing }
+        if let pending = initTask { return try await pending.value }
+
+        let task = Task<WhisperKit, Error> {
+            let config = WhisperKitConfig(
+                model: "tiny.en",
+                verbose: false,
+                logLevel: .error,
+                download: true
+            )
+            let kit = try await WhisperKit(config)
+            sharedWhisperKit = kit
+            return kit
+        }
+        initTask = task
+        do {
+            let kit = try await task.value
+            return kit
+        } catch {
+            initTask = nil
+            throw error
+        }
+    }
+
+    // MARK: - Public API
+
     func start() {
         guard case .idle = state else { return }
 
         let generation = startGeneration
-        requestPermissions { [weak self] granted in
+        AVAudioApplication.requestRecordPermission { [weak self] granted in
             guard let self, self.startGeneration == generation else { return }
             guard granted else {
-                self.fail("Microphone and speech access are required.")
+                self.fail("Microphone access is required.")
                 return
             }
-
             DispatchQueue.main.async { [weak self] in
                 guard let self, self.startGeneration == generation else { return }
-                self.beginRecognitionSession()
+                self.beginStreamingSession()
             }
         }
     }
@@ -58,10 +87,9 @@ final class VoiceDictationController {
         state = .transcribing
         finishWorkItem?.cancel()
 
-        let inputNode = audioEngine.inputNode
-        inputNode.removeTap(onBus: 0)
-        audioEngine.stop()
-        recognitionRequest?.endAudio()
+        Task { [weak self] in
+            await self?.streamTranscriber?.stopStreamTranscription()
+        }
 
         let fallback = DispatchWorkItem { [weak self] in
             guard let self else { return }
@@ -75,105 +103,102 @@ final class VoiceDictationController {
     func cancel() {
         startGeneration &+= 1
         finishWorkItem?.cancel()
-        recognitionTask?.cancel()
-        teardownRecognitionSession()
+        streamTask?.cancel()
+        Task { [weak self] in
+            await self?.streamTranscriber?.stopStreamTranscription()
+        }
+        streamTranscriber = nil
+        streamTask = nil
         state = .idle
     }
 
-    private func requestPermissions(completion: @escaping (Bool) -> Void) {
-        AVAudioApplication.requestRecordPermission { microphoneGranted in
-            guard microphoneGranted else {
-                completion(false)
-                return
-            }
+    // MARK: - Private
 
-            SFSpeechRecognizer.requestAuthorization { status in
-                completion(status == .authorized)
-            }
-        }
-    }
-
-    private func beginRecognitionSession() {
-        guard let speechRecognizer, speechRecognizer.isAvailable else {
-            fail("Speech recognition is unavailable right now.")
-            return
-        }
-
-        teardownRecognitionSession()
+    private func beginStreamingSession() {
         latestTranscript = ""
         lastPublishedPartialTranscript = ""
         hasDeliveredResult = false
         onLevelChange?(0)
 
-        let recognitionRequest = SFSpeechAudioBufferRecognitionRequest()
-        recognitionRequest.shouldReportPartialResults = true
-        self.recognitionRequest = recognitionRequest
+        let generation = startGeneration
 
-        recognitionTask = speechRecognizer.recognitionTask(with: recognitionRequest) { [weak self] result, error in
+        streamTask = Task { [weak self] in
             guard let self else { return }
 
-            if let result {
-                self.latestTranscript = result.bestTranscription.formattedString
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
+            do {
+                let kit = try await Self.getOrInitWhisperKit()
+                guard self.startGeneration == generation else { return }
 
-                if !self.latestTranscript.isEmpty,
-                   self.latestTranscript != self.lastPublishedPartialTranscript {
-                    self.lastPublishedPartialTranscript = self.latestTranscript
-                    DispatchQueue.main.async { [latestTranscript = self.latestTranscript, onPartialTranscript = self.onPartialTranscript] in
-                        onPartialTranscript?(latestTranscript)
+                let options = DecodingOptions(
+                    language: "en",
+                    wordTimestamps: false
+                )
+
+                let transcriber = AudioStreamTranscriber(
+                    audioEncoder: kit.audioEncoder,
+                    featureExtractor: kit.featureExtractor,
+                    segmentSeeker: kit.segmentSeeker,
+                    textDecoder: kit.textDecoder,
+                    tokenizer: kit.tokenizer!,
+                    audioProcessor: kit.audioProcessor,
+                    decodingOptions: options,
+                    requiredSegmentsForConfirmation: 2,
+                    silenceThreshold: 0.3,
+                    useVAD: true,
+                    stateChangeCallback: { [weak self] _, newState in
+                        self?.handleStreamStateChange(newState)
+                    }
+                )
+
+                self.streamTranscriber = transcriber
+
+                await MainActor.run { self.state = .listening }
+                try await transcriber.startStreamTranscription()
+
+                // Stream ended normally (stopStreamTranscription was called)
+                await MainActor.run { [weak self] in
+                    guard let self, !self.hasDeliveredResult else { return }
+                    self.finish(with: self.latestTranscript)
+                }
+            } catch {
+                await MainActor.run { [weak self] in
+                    guard let self else { return }
+                    if !self.latestTranscript.isEmpty {
+                        self.finish(with: self.latestTranscript)
+                    } else {
+                        self.fail(error.localizedDescription)
                     }
                 }
-
-                if result.isFinal {
-                    self.finish(with: self.latestTranscript)
-                    return
-                }
             }
-
-            if let error {
-                if !self.latestTranscript.isEmpty {
-                    self.finish(with: self.latestTranscript)
-                } else {
-                    self.fail(error.localizedDescription)
-                }
-            }
-        }
-
-        let inputNode = audioEngine.inputNode
-        let inputFormat = inputNode.outputFormat(forBus: 0)
-        inputNode.removeTap(onBus: 0)
-        inputNode.installTap(onBus: 0, bufferSize: 1_024, format: inputFormat) { [weak self] buffer, _ in
-            guard let self else { return }
-            recognitionRequest.append(buffer)
-            self.publishLevel(for: buffer)
-        }
-
-        audioEngine.prepare()
-        do {
-            try audioEngine.start()
-            state = .listening
-        } catch {
-            fail(error.localizedDescription)
         }
     }
 
-    private func publishLevel(for buffer: AVAudioPCMBuffer) {
-        guard let channelData = buffer.floatChannelData else { return }
-        let channel = channelData[0]
-        let frameCount = Int(buffer.frameLength)
-        guard frameCount > 0 else { return }
+    private func handleStreamStateChange(_ newState: AudioStreamTranscriber.State) {
+        // Audio level from buffer energy
+        let energy = newState.bufferEnergy.last ?? 0
+        let normalizedLevel = max(0.08, min(CGFloat(energy) * 10, 1))
 
-        var sum: Float = 0
-        for index in 0..<frameCount {
-            let sample = channel[index]
-            sum += sample * sample
-        }
-
-        let rms = sqrt(sum / Float(frameCount))
-        let normalizedLevel = max(0.08, min(CGFloat(rms) * 10, 1))
+        // Build combined text from confirmed + unconfirmed segments
+        let confirmedText = newState.confirmedSegments.map(\.text).joined(separator: " ")
+        let unconfirmedText = newState.unconfirmedSegments.map(\.text).joined(separator: " ")
+        let currentText = newState.currentText
+        let parts = [confirmedText, unconfirmedText, currentText]
+            .filter { !$0.isEmpty }
+        let combined = parts.joined(separator: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
 
         DispatchQueue.main.async { [weak self] in
-            self?.onLevelChange?(normalizedLevel)
+            guard let self else { return }
+            self.onLevelChange?(normalizedLevel)
+
+            // Filter out the "Waiting for speech..." placeholder
+            let displayText = combined == "Waiting for speech..." ? "" : combined
+
+            if !displayText.isEmpty, displayText != self.lastPublishedPartialTranscript {
+                self.latestTranscript = displayText
+                self.lastPublishedPartialTranscript = displayText
+                self.onPartialTranscript?(displayText)
+            }
         }
     }
 
@@ -182,8 +207,7 @@ final class VoiceDictationController {
         hasDeliveredResult = true
 
         finishWorkItem?.cancel()
-        recognitionTask?.cancel()
-        teardownRecognitionSession()
+        teardownStreamingSession()
         state = .idle
 
         let trimmed = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -195,8 +219,7 @@ final class VoiceDictationController {
 
     private func fail(_ message: String) {
         finishWorkItem?.cancel()
-        recognitionTask?.cancel()
-        teardownRecognitionSession()
+        teardownStreamingSession()
         state = .failed(message)
 
         DispatchQueue.main.async { [weak self] in
@@ -204,12 +227,9 @@ final class VoiceDictationController {
         }
     }
 
-    private func teardownRecognitionSession() {
-        if audioEngine.isRunning {
-            audioEngine.stop()
-        }
-        audioEngine.inputNode.removeTap(onBus: 0)
-        recognitionRequest = nil
-        recognitionTask = nil
+    private func teardownStreamingSession() {
+        streamTask?.cancel()
+        streamTask = nil
+        streamTranscriber = nil
     }
 }

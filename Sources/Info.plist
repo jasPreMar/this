@@ -36,8 +36,6 @@
 	<string>"This" uses your microphone for invoke-key voice input.</string>
 	<key>NSRemindersUsageDescription</key>
 	<string>"This" can read and create reminders when you ask it to manage your tasks.</string>
-	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>"This" converts your speech to text so you can dictate prompts hands-free.</string>
 	<key>SUEnableAutomaticChecks</key>
 	<true/>
 	<key>SUFeedURL</key>

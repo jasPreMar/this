@@ -3,7 +3,7 @@ import AVFoundation
 import Carbon
 import Contacts
 import EventKit
-import Speech
+
 
 enum ClaudeSetupChoice {
     case thisMac
@@ -18,7 +18,6 @@ enum PermissionResumeDestination: String {
 private enum PendingPermissionRequest: String {
     case screenRecording
     case microphone
-    case speechRecognition
     case contacts
     case calendars
     case reminders
@@ -54,7 +53,6 @@ final class OnboardingViewModel: ObservableObject {
     @Published var isAccessibilityGranted = false
     @Published var isScreenRecordingGranted = false
     @Published var microphoneStatus: AVAuthorizationStatus = .notDetermined
-    @Published var speechStatus: SFSpeechRecognizerAuthorizationStatus = .notDetermined
     @Published var contactsStatus: CNAuthorizationStatus = .notDetermined
     @Published var calendarsStatus: EKAuthorizationStatus = .notDetermined
     @Published var remindersStatus: EKAuthorizationStatus = .notDetermined
@@ -63,7 +61,6 @@ final class OnboardingViewModel: ObservableObject {
     @Published private(set) var isAccessibilityRequestInFlight = false
     @Published private(set) var isScreenRecordingRequestInFlight = false
     @Published private(set) var isMicrophoneRequestInFlight = false
-    @Published private(set) var isSpeechRecognitionRequestInFlight = false
     @Published private(set) var isContactsRequestInFlight = false
     @Published private(set) var isCalendarsRequestInFlight = false
     @Published private(set) var isRemindersRequestInFlight = false
@@ -108,10 +105,6 @@ final class OnboardingViewModel: ObservableObject {
 
     var isMicrophoneGranted: Bool {
         microphoneStatus == .authorized
-    }
-
-    var isSpeechRecognitionGranted: Bool {
-        speechStatus == .authorized
     }
 
     var isContactsGranted: Bool {
@@ -230,34 +223,6 @@ final class OnboardingViewModel: ObservableObject {
                 if !granted {
                     self.openMicrophoneSettings()
                 }
-            }
-        }
-    }
-
-    func requestSpeechRecognition(resumeDestination: PermissionResumeDestination = .onboarding) {
-        guard !isSpeechRecognitionRequestInFlight else { return }
-        if prepareAppBundleForSensitivePermissionIfNeeded(.speechRecognition, resumeDestination: resumeDestination) { return }
-
-        switch SFSpeechRecognizer.authorizationStatus() {
-        case .authorized:
-            refreshPermissionState()
-            return
-        case .denied, .restricted:
-            openSpeechSettings()
-            return
-        case .notDetermined:
-            break
-        @unknown default:
-            break
-        }
-
-        isSpeechRecognitionRequestInFlight = true
-        NSApp.activate(ignoringOtherApps: true)
-
-        SFSpeechRecognizer.requestAuthorization { _ in
-            DispatchQueue.main.async {
-                self.isSpeechRecognitionRequestInFlight = false
-                self.refreshPermissionState()
             }
         }
     }
@@ -395,10 +360,6 @@ final class OnboardingViewModel: ObservableObject {
         openSettings(anchor: "Privacy_Microphone")
     }
 
-    func openSpeechSettings() {
-        openSettings(anchor: "Privacy_SpeechRecognition")
-    }
-
     func openCalendarsSettings() {
         openSettings(anchor: "Privacy_Calendars")
     }
@@ -519,7 +480,6 @@ final class OnboardingViewModel: ObservableObject {
         update(\.isAccessibilityGranted, to: newAccessibilityGranted)
         update(\.isScreenRecordingGranted, to: CGPreflightScreenCaptureAccess())
         update(\.microphoneStatus, to: AVCaptureDevice.authorizationStatus(for: .audio))
-        update(\.speechStatus, to: SFSpeechRecognizer.authorizationStatus())
         update(\.contactsStatus, to: CNContactStore.authorizationStatus(for: .contacts))
         update(\.calendarsStatus, to: EKEventStore.authorizationStatus(for: .event))
         update(\.remindersStatus, to: EKEventStore.authorizationStatus(for: .reminder))
@@ -685,8 +645,6 @@ final class OnboardingViewModel: ObservableObject {
                 self.requestScreenRecording()
             case .microphone:
                 self.requestMicrophone()
-            case .speechRecognition:
-                self.requestSpeechRecognition()
             case .contacts:
                 self.requestContacts()
             case .calendars:

@@ -450,22 +450,6 @@ private struct PermissionsSettingsPane: View {
                     divider
 
                     SettingsPermissionStatusRow(
-                        title: "Speech Recognition",
-                        description: "Transcribe dictated prompts on this Mac.",
-                        icon: "waveform",
-                        state: permissionState(
-                            isGranted: viewModel.isSpeechRecognitionGranted,
-                            isBusy: viewModel.isSpeechRecognitionRequestInFlight
-                        ) {
-                            if !viewModel.isSpeechRecognitionGranted {
-                                viewModel.requestSpeechRecognition(resumeDestination: .settingsPermissions)
-                            }
-                        }
-                    )
-
-                    divider
-
-                    SettingsPermissionStatusRow(
                         title: "Reminders",
                         description: "Allow \"This\" to read or create reminders when needed.",
                         icon: "checklist",
