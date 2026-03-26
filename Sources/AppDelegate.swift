@@ -126,6 +126,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     private var settingsWindow: NSWindow?
     private var panelsPendingCommandMenuReveal: Set<ObjectIdentifier> = []
     private var commandKeyHeld = false
+    private var lastInvokeKeyReleaseTime: TimeInterval = 0
+    private static let doubleTapInterval: TimeInterval = 0.3
     private weak var commandKeyPanel: FloatingPanel?
     private let commandMenuVoiceController = VoiceDictationController()
     private var updaterController: SPUStandardUpdaterController?
@@ -199,8 +201,23 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             return
         }
 
+        // Check if an existing panel is in pinned-follow mode
+        if let pinnedPanel = panels.first(where: { $0.isVisible && $0.isPinnedFollowMode }) {
+            if invokeKeyDown && !commandKeyHeld {
+                commandKeyHeld = true
+                pinnedPanel.handleInvokeKeyInPinnedMode()
+            } else if !invokeKeyDown && commandKeyHeld {
+                commandKeyHeld = false
+                lastInvokeKeyReleaseTime = ProcessInfo.processInfo.systemUptime
+            }
+            return
+        }
+
         if invokeKeyDown && !commandKeyHeld {
             commandKeyHeld = true
+
+            let now = ProcessInfo.processInfo.systemUptime
+            let isDoubleTap = (now - lastInvokeKeyReleaseTime) < Self.doubleTapInterval
 
             if let selectedPanel = selectedVisiblePanel(),
                selectedPanel.searchViewModel.isChatMode {
@@ -208,6 +225,25 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
                 selectedPanel.isCommandKeyHeld = true
                 selectedPanel.startAnchoredVoiceMode(with: modifierFlags)
                 startHoverLogging(using: selectedPanel.searchViewModel)
+            } else if isDoubleTap {
+                // Double-tap: enter pinned follow mode
+                if let existing = panels.first(where: {
+                    $0.isVisible && !$0.searchViewModel.isChatMode
+                }) {
+                    // Reuse existing panel — transition to pinned mode
+                    commandKeyPanel = nil
+                    existing.isCommandKeyHeld = false
+                    existing.startPinnedFollowMode(with: modifierFlags)
+                    startHoverLogging(using: existing.searchViewModel)
+                } else {
+                    panels.removeAll { !$0.isVisible && !$0.preservesTaskHistory }
+                    let panel = makePanel()
+                    panels.append(panel)
+                    panel.startPinnedFollowMode(with: modifierFlags)
+                    startHoverLogging(using: panel.searchViewModel)
+                }
+                // Release commandKeyHeld since pinned mode doesn't need it held
+                commandKeyHeld = false
             } else if let existing = panels.first(where: {
                 $0.isVisible && !$0.searchViewModel.isChatMode
             }) {
@@ -227,6 +263,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             commandKeyPanel?.updateModifierFlags(modifierFlags)
         } else if !invokeKeyDown && commandKeyHeld {
             commandKeyHeld = false
+            lastInvokeKeyReleaseTime = ProcessInfo.processInfo.systemUptime
             if let panel = commandKeyPanel {
                 stopHoverLogging(keepRealtimeSessionAlive: panel.searchViewModel.voiceState == .listening || panel.searchViewModel.voiceState == .transcribing)
                 panel.isCommandKeyHeld = false

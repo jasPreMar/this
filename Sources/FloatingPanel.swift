@@ -7,6 +7,7 @@ class FloatingPanel: NSPanel {
     private enum InvokeHoldBehavior {
         case cursorFollow
         case anchoredInput
+        case pinnedFollow
     }
 
     private struct MouseShakeDetector {
@@ -174,6 +175,10 @@ class FloatingPanel: NSPanel {
     private var mouseShakeDetector = MouseShakeDetector()
     private var safeTriangleApex: NSPoint?
     private var invokeHoldBehavior: InvokeHoldBehavior?
+    private var pinnedPauseWorkItem: DispatchWorkItem?
+    private var pinnedInputVisible = false
+    private var escapeKeyMonitor: Any?
+    private var pinnedLocalMouseMonitor: Any?
     private var cancellables = Set<AnyCancellable>()
     private(set) var taskStartedAt: Date?
     private(set) var taskCompletedAt: Date?
@@ -182,6 +187,7 @@ class FloatingPanel: NSPanel {
     let taskId = UUID()
     var persistedSessionId: String?
     var isCommandKeyHeld = false
+    var isPinnedFollowMode: Bool { invokeHoldBehavior == .pinnedFollow }
     var onCommandKeyDropped: (() -> Void)?
     var onFeedbackShake: (() -> Void)?
     var onMessageSent: (() -> Void)?
@@ -894,6 +900,8 @@ class FloatingPanel: NSPanel {
             }
             self.handleCommandKeyMouseMove()
         }
+
+        installEscapeMonitor()
     }
 
     /// Called when the invoke hotkey is released. Anchors the panel and shows the input row.
@@ -905,6 +913,9 @@ class FloatingPanel: NSPanel {
         case .anchoredInput:
             stopVoiceModeIfNeeded()
             invokeHoldBehavior = nil
+        case .pinnedFollow:
+            // Pinned mode doesn't end on key release — it persists until Esc
+            break
         case nil:
             break
         }
@@ -971,6 +982,8 @@ class FloatingPanel: NSPanel {
         if let m = globalMouseMonitor { NSEvent.removeMonitor(m); globalMouseMonitor = nil }
         if let m = localMouseMonitor { NSEvent.removeMonitor(m); localMouseMonitor = nil }
         if let m = commandKeyMouseMonitor { NSEvent.removeMonitor(m); commandKeyMouseMonitor = nil }
+        cancelPinnedPauseTimer()
+        pinnedInputVisible = false
 
         isCommandKeyHeld = true
         currentModifierFlags = modifierFlags
@@ -993,6 +1006,8 @@ class FloatingPanel: NSPanel {
             self.handleCommandKeyMouseMove()
             return event
         }
+
+        installEscapeMonitor()
     }
 
     func startAnchoredVoiceMode(with modifierFlags: NSEvent.ModifierFlags) {
@@ -1025,6 +1040,158 @@ class FloatingPanel: NSPanel {
 
         positionAtCursor(using: mouseLocation)
         searchViewModel.updateHoveredApp()
+    }
+
+    // MARK: - Escape key monitor
+
+    private func installEscapeMonitor() {
+        if escapeKeyMonitor != nil { return }
+        escapeKeyMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard event.keyCode == 53 else { return } // 53 = Escape
+            self?.dismiss(restorePreviousFocus: true)
+        }
+    }
+
+    private func removeEscapeMonitor() {
+        if let m = escapeKeyMonitor { NSEvent.removeMonitor(m); escapeKeyMonitor = nil }
+    }
+
+    // MARK: - Pinned follow mode (double-tap invoke key)
+
+    /// Enters hands-free cursor-follow mode. The panel follows the cursor without
+    /// needing to hold the invoke key. If autovoice is enabled, voice mode starts
+    /// immediately and persists until the user presses the invoke key (to send) or
+    /// Escape (to cancel). Without voice, pausing on an object for >1s shows the
+    /// text input; moving away hides it (unless text has been typed).
+    func startPinnedFollowMode(with modifierFlags: NSEvent.ModifierFlags) {
+        invokeHoldBehavior = .pinnedFollow
+        isCommandKeyHeld = false
+        currentModifierFlags = modifierFlags
+        searchViewModel.isCommandKeyMode = true
+        searchViewModel.isMinimalMode = false
+        searchViewModel.query = ""
+        isCommandKeyVisible = true
+        isCursorFollowing = true
+        pinnedInputVisible = false
+        mouseShakeDetector.reset()
+
+        searchViewModel.updateHoveredApp()
+        positionAtCursor()
+        orderFront(nil)
+
+        // Start voice if autovoice is on or shift is held
+        if AppSettings.autoVoiceEnabled || modifierFlags.contains(.shift) {
+            voiceController.start()
+        }
+
+        commandKeyMouseMonitor = NSEvent.addGlobalMonitorForEvents(matching: .mouseMoved) { [weak self] _ in
+            self?.handlePinnedMouseMove()
+        }
+        pinnedLocalMouseMonitor = NSEvent.addLocalMonitorForEvents(matching: .mouseMoved) { [weak self] event in
+            self?.handlePinnedMouseMove()
+            return event
+        }
+
+        installEscapeMonitor()
+    }
+
+    private func handlePinnedMouseMove() {
+        guard invokeHoldBehavior == .pinnedFollow else { return }
+
+        let mouseLocation = NSEvent.mouseLocation
+
+        if mouseShakeDetector.register(point: mouseLocation) {
+            dismiss(restorePreviousFocus: false)
+            onFeedbackShake?()
+            return
+        }
+
+        // If voice is active (listening or transcribing), just follow — no pause-to-type
+        if searchViewModel.isVoiceModeActive {
+            positionAtCursor(using: mouseLocation)
+            searchViewModel.updateHoveredApp()
+            return
+        }
+
+        let cursorOverPanel = isCursorOverPanel(mouseLocation)
+
+        if pinnedInputVisible {
+            // Input is showing. If cursor is over panel, stay anchored.
+            // If cursor moves away, follow cursor (keep text if any).
+            if !cursorOverPanel {
+                // Resume following
+                if searchViewModel.query.isEmpty {
+                    // No text typed — hide input, back to command key mode
+                    pinnedInputVisible = false
+                    searchViewModel.isCommandKeyMode = true
+                }
+                positionAtCursor(using: mouseLocation)
+                searchViewModel.updateHoveredApp()
+                resetPinnedPauseTimer()
+            }
+            // If cursor is over panel, do nothing — panel stays anchored
+        } else {
+            // Input not showing — follow cursor and manage pause timer
+            positionAtCursor(using: mouseLocation)
+            searchViewModel.updateHoveredApp()
+            resetPinnedPauseTimer()
+        }
+    }
+
+    private func resetPinnedPauseTimer() {
+        cancelPinnedPauseTimer()
+
+        // Don't start pause timer if voice is active
+        guard !searchViewModel.isVoiceModeActive else { return }
+
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self,
+                  self.invokeHoldBehavior == .pinnedFollow,
+                  !self.searchViewModel.isVoiceModeActive else { return }
+            self.showPinnedInput()
+        }
+        pinnedPauseWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: workItem)
+    }
+
+    private func cancelPinnedPauseTimer() {
+        pinnedPauseWorkItem?.cancel()
+        pinnedPauseWorkItem = nil
+    }
+
+    private func showPinnedInput() {
+        guard invokeHoldBehavior == .pinnedFollow else { return }
+        pinnedInputVisible = true
+        searchViewModel.isCommandKeyMode = false
+        prepareForTextInputFocus()
+        makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+
+        DispatchQueue.main.async { [weak self] in
+            self?.clampFrameToScreen()
+        }
+    }
+
+    private func isCursorOverPanel(_ cursor: NSPoint) -> Bool {
+        let padding: CGFloat = 8
+        let paddedFrame = frame.insetBy(dx: -padding, dy: -padding)
+        return paddedFrame.contains(cursor)
+    }
+
+    /// Called when invoke key is pressed while in pinned-follow mode.
+    /// If voice is active, this sends the voice message. If nothing has been
+    /// spoken or typed, dismiss the panel.
+    func handleInvokeKeyInPinnedMode() {
+        guard invokeHoldBehavior == .pinnedFollow else { return }
+
+        if searchViewModel.voiceState == .listening || searchViewModel.voiceState == .transcribing {
+            // Voice is active — send it
+            voiceController.stop()
+        } else if searchViewModel.query.isEmpty {
+            // Nothing spoken or typed — dismiss
+            dismiss(restorePreviousFocus: true)
+        }
+        // If text has been typed, invoke key is a no-op (use Enter to submit, Esc to dismiss)
     }
 
     /// Returns true when the cursor is inside the panel frame (with padding) or
@@ -1094,7 +1261,9 @@ class FloatingPanel: NSPanel {
             localMouseMonitor,
             globalClickMonitor,
             commandKeyMouseMonitor,
-            dragStartMonitor
+            dragStartMonitor,
+            escapeKeyMonitor,
+            pinnedLocalMouseMonitor
         ].compactMap({ $0 }) {
             NSEvent.removeMonitor(monitor)
         }
@@ -1103,7 +1272,10 @@ class FloatingPanel: NSPanel {
         globalClickMonitor = nil
         commandKeyMouseMonitor = nil
         dragStartMonitor = nil
+        escapeKeyMonitor = nil
+        pinnedLocalMouseMonitor = nil
         cancelPendingDrag()
+        cancelPinnedPauseTimer()
         mouseShakeDetector.reset()
     }
 
@@ -1145,6 +1317,7 @@ class FloatingPanel: NSPanel {
         isCommandKeyVisible = false
         isCursorFollowing = false
         invokeHoldBehavior = nil
+        pinnedInputVisible = false
         safeTriangleApex = nil
         currentModifierFlags = []
         isCommandKeyHeld = false
@@ -1188,6 +1361,7 @@ class FloatingPanel: NSPanel {
         isCommandKeyVisible = false
         isCursorFollowing = false
         invokeHoldBehavior = nil
+        pinnedInputVisible = false
         safeTriangleApex = nil
         currentModifierFlags = []
         isCommandKeyHeld = false
@@ -1297,6 +1471,8 @@ class FloatingPanel: NSPanel {
         case .cursorFollow:
             return searchViewModel.isCommandKeyMode
         case .anchoredInput:
+            return true
+        case .pinnedFollow:
             return true
         case nil:
             return false
