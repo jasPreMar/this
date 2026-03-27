@@ -43,7 +43,7 @@ final class VoiceDictationController {
         if let pending = initTask { return try await pending.value }
 
         let task = Task<WhisperKit, Error> {
-            guard let modelPath = Bundle.main.path(forResource: "openai_whisper-tiny.en", ofType: nil) else {
+            guard let modelPath = Bundle.module.path(forResource: "openai_whisper-tiny.en", ofType: nil) else {
                 throw NSError(domain: "VoiceDictation", code: -1,
                               userInfo: [NSLocalizedDescriptionKey: "Whisper model not found in app bundle"])
             }
