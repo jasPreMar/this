@@ -26,6 +26,7 @@ let package = Package(
                 .process("Resources/StatusBarIcon.png"),
                 .process("Resources/StatusBarIcon@2x.png"),
                 .process("Resources/StatusBarIcon@3x.png"),
+                .copy("Resources/WhisperModels/openai_whisper-tiny.en"),
             ],
             // Embed Info.plist so macOS shows proper privacy descriptions in TCC dialogs.
             // Run `swift build` from the package root so the relative path resolves correctly.
