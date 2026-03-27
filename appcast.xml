@@ -8,15 +8,15 @@
     <description>This changelog</description>
     <language>en</language>
     <item>
-      <title>Version 1.0.103</title>
-      <sparkle:version>103</sparkle:version>
-      <sparkle:shortVersionString>1.0.103</sparkle:shortVersionString>
-      <pubDate>Thu, 26 Mar 2026 16:53:30 +0000</pubDate>
+      <title>Version 1.0.104</title>
+      <sparkle:version>104</sparkle:version>
+      <sparkle:shortVersionString>1.0.104</sparkle:shortVersionString>
+      <pubDate>Fri, 27 Mar 2026 13:19:27 +0000</pubDate>
       <enclosure
-        url="https://github.com/jasPreMar/this/releases/download/v1.0.103/This.dmg"
-        length="6993109"
+        url="https://github.com/jasPreMar/this/releases/download/v1.0.104/This.dmg"
+        length="8450267"
         type="application/octet-stream"
-        sparkle:edSignature="wbZvgSlFEm00xh5KmCCW1ZEZO/dKHaXOkvVRbTTBJF49cxYBt2DlHIEnge+fK0wINUX8hvh6qLT7O2Edeaf/DA==" />
+        sparkle:edSignature="JoHWj22b7mS03PzG/mkIIhLW1jQc5Wxfa/eYrPsP5/M/qdDt9vh4n1oUMh7u8YIUffPifV4jOoMemziI343fAw==" />
     </item>
   </channel>
 </rss>
