@@ -38,12 +38,33 @@ final class VoiceDictationController {
     private static var sharedWhisperKit: WhisperKit?
     private static var initTask: Task<WhisperKit, Error>?
 
+    /// Locate the SwiftPM resource bundle.  `Bundle.module` crashes when the
+    /// binary is repackaged into a .app by build-app.sh, so we resolve it
+    /// manually: first inside Contents/Resources/ (.app layout), then next
+    /// to the executable (swift run layout).
+    private static let resourceBundle: Bundle = {
+        let bundleName = "This_This.bundle"
+        // .app layout: Contents/Resources/This_This.bundle
+        if let url = Bundle.main.url(forResource: "This_This", withExtension: "bundle"),
+           let bundle = Bundle(url: url) {
+            return bundle
+        }
+        // swift run layout: next to the executable
+        if let execURL = Bundle.main.executableURL {
+            let adjacent = execURL.deletingLastPathComponent().appendingPathComponent(bundleName)
+            if let bundle = Bundle(url: adjacent) {
+                return bundle
+            }
+        }
+        fatalError("Could not locate \(bundleName)")
+    }()
+
     static func getOrInitWhisperKit() async throws -> WhisperKit {
         if let existing = sharedWhisperKit { return existing }
         if let pending = initTask { return try await pending.value }
 
         let task = Task<WhisperKit, Error> {
-            guard let modelPath = Bundle.module.path(forResource: "openai_whisper-tiny.en", ofType: nil) else {
+            guard let modelPath = resourceBundle.path(forResource: "openai_whisper-tiny.en", ofType: nil) else {
                 throw NSError(domain: "VoiceDictation", code: -1,
                               userInfo: [NSLocalizedDescriptionKey: "Whisper model not found in app bundle"])
             }
