@@ -1,6 +1,6 @@
 import AVFoundation
 import Foundation
-import WhisperKit
+import Speech
 
 final class VoiceDictationController {
     enum State: Equatable {
@@ -15,8 +15,10 @@ final class VoiceDictationController {
     var onPartialTranscript: ((String) -> Void)?
     var onTranscript: ((String) -> Void)?
 
-    private var streamTranscriber: AudioStreamTranscriber?
-    private var streamTask: Task<Void, Never>?
+    private let audioEngine = AVAudioEngine()
+    private let speechRecognizer = SFSpeechRecognizer(locale: .autoupdatingCurrent)
+    private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
+    private var recognitionTask: SFSpeechRecognitionTask?
     private var state: State = .idle {
         didSet {
             guard oldValue != state else { return }
@@ -33,77 +35,20 @@ final class VoiceDictationController {
     private var hasDeliveredResult = false
     private var startGeneration: UInt = 0
 
-    // MARK: - Shared WhisperKit instance
-
-    private static var sharedWhisperKit: WhisperKit?
-    private static var initTask: Task<WhisperKit, Error>?
-
-    /// Locate the SwiftPM resource bundle.  `Bundle.module` crashes when the
-    /// binary is repackaged into a .app by build-app.sh, so we resolve it
-    /// manually: first inside Contents/Resources/ (.app layout), then next
-    /// to the executable (swift run layout).
-    private static let resourceBundle: Bundle = {
-        let bundleName = "This_This.bundle"
-        // .app layout: Contents/Resources/This_This.bundle
-        if let url = Bundle.main.url(forResource: "This_This", withExtension: "bundle"),
-           let bundle = Bundle(url: url) {
-            return bundle
-        }
-        // swift run layout: next to the executable
-        if let execURL = Bundle.main.executableURL {
-            let adjacent = execURL.deletingLastPathComponent().appendingPathComponent(bundleName)
-            if let bundle = Bundle(url: adjacent) {
-                return bundle
-            }
-        }
-        fatalError("Could not locate \(bundleName)")
-    }()
-
-    static func getOrInitWhisperKit() async throws -> WhisperKit {
-        if let existing = sharedWhisperKit { return existing }
-        if let pending = initTask { return try await pending.value }
-
-        let task = Task<WhisperKit, Error> {
-            guard let modelPath = resourceBundle.path(forResource: "openai_whisper-tiny.en", ofType: nil) else {
-                throw NSError(domain: "VoiceDictation", code: -1,
-                              userInfo: [NSLocalizedDescriptionKey: "Whisper model not found in app bundle"])
-            }
-            let config = WhisperKitConfig(
-                model: "tiny.en",
-                modelFolder: modelPath,
-                verbose: false,
-                logLevel: .error,
-                download: false
-            )
-            let kit = try await WhisperKit(config)
-            sharedWhisperKit = kit
-            return kit
-        }
-        initTask = task
-        do {
-            let kit = try await task.value
-            return kit
-        } catch {
-            initTask = nil
-            throw error
-        }
-    }
-
-    // MARK: - Public API
-
     func start() {
         guard case .idle = state else { return }
 
         let generation = startGeneration
-        AVAudioApplication.requestRecordPermission { [weak self] granted in
+        requestPermissions { [weak self] granted in
             guard let self, self.startGeneration == generation else { return }
             guard granted else {
-                self.fail("Microphone access is required.")
+                self.fail("Microphone and speech access are required.")
                 return
             }
+
             DispatchQueue.main.async { [weak self] in
                 guard let self, self.startGeneration == generation else { return }
-                self.beginStreamingSession()
+                self.beginRecognitionSession()
             }
         }
     }
@@ -114,9 +59,10 @@ final class VoiceDictationController {
         state = .transcribing
         finishWorkItem?.cancel()
 
-        Task { [weak self] in
-            await self?.streamTranscriber?.stopStreamTranscription()
-        }
+        let inputNode = audioEngine.inputNode
+        inputNode.removeTap(onBus: 0)
+        audioEngine.stop()
+        recognitionRequest?.endAudio()
 
         let fallback = DispatchWorkItem { [weak self] in
             guard let self else { return }
@@ -130,110 +76,107 @@ final class VoiceDictationController {
     func cancel() {
         startGeneration &+= 1
         finishWorkItem?.cancel()
-        streamTask?.cancel()
-        let transcriber = streamTranscriber
-        streamTranscriber = nil
-        Task {
-            await transcriber?.stopStreamTranscription()
-        }
-        streamTask = nil
+        recognitionTask?.cancel()
+        teardownRecognitionSession()
         state = .idle
     }
 
-    // MARK: - Private
+    private func requestPermissions(completion: @escaping (Bool) -> Void) {
+        AVAudioApplication.requestRecordPermission { microphoneGranted in
+            guard microphoneGranted else {
+                completion(false)
+                return
+            }
 
-    private func beginStreamingSession() {
+            SFSpeechRecognizer.requestAuthorization { status in
+                completion(status == .authorized)
+            }
+        }
+    }
+
+    private func beginRecognitionSession() {
+        guard let speechRecognizer, speechRecognizer.isAvailable else {
+            fail("Speech recognition is unavailable right now.")
+            return
+        }
+
+        teardownRecognitionSession()
         latestTranscript = ""
         lastPublishedPartialTranscript = ""
         hasDeliveredResult = false
         hasTranscribedSpeech = false
         onLevelChange?(0)
 
-        let generation = startGeneration
+        let recognitionRequest = SFSpeechAudioBufferRecognitionRequest()
+        recognitionRequest.shouldReportPartialResults = true
+        self.recognitionRequest = recognitionRequest
 
-        streamTask = Task { [weak self] in
+        recognitionTask = speechRecognizer.recognitionTask(with: recognitionRequest) { [weak self] result, error in
             guard let self else { return }
 
-            do {
-                let kit = try await Self.getOrInitWhisperKit()
-                guard self.startGeneration == generation else { return }
+            if let result {
+                self.latestTranscript = result.bestTranscription.formattedString
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
 
-                guard let tokenizer = kit.tokenizer else {
-                    throw NSError(domain: "VoiceDictation", code: -1,
-                                  userInfo: [NSLocalizedDescriptionKey: "Tokenizer failed to load"])
+                if !self.latestTranscript.isEmpty,
+                   self.latestTranscript != self.lastPublishedPartialTranscript {
+                    self.hasTranscribedSpeech = true
+                    self.lastPublishedPartialTranscript = self.latestTranscript
+                    DispatchQueue.main.async { [latestTranscript = self.latestTranscript, onPartialTranscript = self.onPartialTranscript] in
+                        onPartialTranscript?(latestTranscript)
+                    }
                 }
 
-                let options = DecodingOptions(
-                    language: "en",
-                    wordTimestamps: false
-                )
-
-                let transcriber = AudioStreamTranscriber(
-                    audioEncoder: kit.audioEncoder,
-                    featureExtractor: kit.featureExtractor,
-                    segmentSeeker: kit.segmentSeeker,
-                    textDecoder: kit.textDecoder,
-                    tokenizer: tokenizer,
-                    audioProcessor: kit.audioProcessor,
-                    decodingOptions: options,
-                    requiredSegmentsForConfirmation: 2,
-                    silenceThreshold: 0.3,
-                    useVAD: true,
-                    stateChangeCallback: { [weak self] _, newState in
-                        self?.handleStreamStateChange(newState)
-                    }
-                )
-
-                self.streamTranscriber = transcriber
-
-                await MainActor.run { self.state = .listening }
-                try await transcriber.startStreamTranscription()
-
-                // Stream ended normally (stopStreamTranscription was called)
-                await MainActor.run { [weak self] in
-                    guard let self, !self.hasDeliveredResult else { return }
+                if result.isFinal {
                     self.finish(with: self.latestTranscript)
+                    return
                 }
-            } catch {
-                await MainActor.run { [weak self] in
-                    guard let self else { return }
-                    if !self.latestTranscript.isEmpty {
-                        self.finish(with: self.latestTranscript)
-                    } else {
-                        self.fail(error.localizedDescription)
-                    }
+            }
+
+            if let error {
+                if !self.latestTranscript.isEmpty {
+                    self.finish(with: self.latestTranscript)
+                } else {
+                    self.fail(error.localizedDescription)
                 }
             }
         }
+
+        let inputNode = audioEngine.inputNode
+        let inputFormat = inputNode.outputFormat(forBus: 0)
+        inputNode.removeTap(onBus: 0)
+        inputNode.installTap(onBus: 0, bufferSize: 1_024, format: inputFormat) { [weak self] buffer, _ in
+            guard let self else { return }
+            recognitionRequest.append(buffer)
+            self.publishLevel(for: buffer)
+        }
+
+        audioEngine.prepare()
+        do {
+            try audioEngine.start()
+            state = .listening
+        } catch {
+            fail(error.localizedDescription)
+        }
     }
 
-    private func handleStreamStateChange(_ newState: AudioStreamTranscriber.State) {
-        // Audio level from buffer energy
-        let energy = newState.bufferEnergy.last ?? 0
-        let normalizedLevel = max(0.08, min(CGFloat(energy) * 10, 1))
+    private func publishLevel(for buffer: AVAudioPCMBuffer) {
+        guard let channelData = buffer.floatChannelData else { return }
+        let channel = channelData[0]
+        let frameCount = Int(buffer.frameLength)
+        guard frameCount > 0 else { return }
 
-        // Build combined text from confirmed + unconfirmed segments
-        let confirmedText = newState.confirmedSegments.map(\.text).joined(separator: " ")
-        let unconfirmedText = newState.unconfirmedSegments.map(\.text).joined(separator: " ")
-        let currentText = newState.currentText
-        let parts = [confirmedText, unconfirmedText, currentText]
-            .filter { !$0.isEmpty }
-        let combined = parts.joined(separator: " ")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        var sum: Float = 0
+        for index in 0..<frameCount {
+            let sample = channel[index]
+            sum += sample * sample
+        }
+
+        let rms = sqrt(sum / Float(frameCount))
+        let normalizedLevel = max(0.08, min(CGFloat(rms) * 10, 1))
 
         DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            self.onLevelChange?(normalizedLevel)
-
-            // Filter out the "Waiting for speech..." placeholder
-            let displayText = combined == "Waiting for speech..." ? "" : combined
-
-            if !displayText.isEmpty, displayText != self.lastPublishedPartialTranscript {
-                self.hasTranscribedSpeech = true
-                self.latestTranscript = displayText
-                self.lastPublishedPartialTranscript = displayText
-                self.onPartialTranscript?(displayText)
-            }
+            self?.onLevelChange?(normalizedLevel)
         }
     }
 
@@ -242,7 +185,8 @@ final class VoiceDictationController {
         hasDeliveredResult = true
 
         finishWorkItem?.cancel()
-        teardownStreamingSession()
+        recognitionTask?.cancel()
+        teardownRecognitionSession()
         state = .idle
 
         let trimmed = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -254,7 +198,8 @@ final class VoiceDictationController {
 
     private func fail(_ message: String) {
         finishWorkItem?.cancel()
-        teardownStreamingSession()
+        recognitionTask?.cancel()
+        teardownRecognitionSession()
         state = .failed(message)
 
         DispatchQueue.main.async { [weak self] in
@@ -262,9 +207,12 @@ final class VoiceDictationController {
         }
     }
 
-    private func teardownStreamingSession() {
-        streamTask?.cancel()
-        streamTask = nil
-        streamTranscriber = nil
+    private func teardownRecognitionSession() {
+        if audioEngine.isRunning {
+            audioEngine.stop()
+        }
+        audioEngine.inputNode.removeTap(onBus: 0)
+        recognitionRequest = nil
+        recognitionTask = nil
     }
 }

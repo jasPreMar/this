@@ -15,9 +15,9 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.0.107</string>
+	<string>1.0.102</string>
 	<key>CFBundleVersion</key>
-	<string>107</string>
+	<string>102</string>
 	<key>LSUIElement</key>
 	<true/>
 	<key>NSAppleEventsUsageDescription</key>
@@ -36,6 +36,8 @@
 	<string>"This" uses your microphone for invoke-key voice input.</string>
 	<key>NSRemindersUsageDescription</key>
 	<string>"This" can read and create reminders when you ask it to manage your tasks.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>"This" converts your speech to text so you can dictate prompts hands-free.</string>
 	<key>SUEnableAutomaticChecks</key>
 	<true/>
 	<key>SUFeedURL</key>

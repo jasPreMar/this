@@ -202,6 +202,24 @@ private struct PermissionsStep: View {
                     }
                 )
 
+                Divider()
+                    .padding(.leading, 64)
+
+                PermissionStatusRow(
+                    title: "Speech Recognition",
+                    description: "Transcribe dictated prompts on this Mac.",
+                    icon: "waveform",
+                    state: permissionState(
+                        isGranted: viewModel.isSpeechRecognitionGranted,
+                        isBusy: viewModel.isSpeechRecognitionRequestInFlight
+                    ) {
+                        if !viewModel.isSpeechRecognitionGranted {
+                            viewModel.requestSpeechRecognition(resumeDestination: .onboarding)
+                        }
+                    }
+                )
+
+
 
 
                 Divider()

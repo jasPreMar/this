@@ -154,7 +154,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     func applicationDidFinishLaunching(_ notification: Notification) {
         sharedAppDelegate = self
         AppSettings.registerDefaults()
-        Task { try? await VoiceDictationController.getOrInitWhisperKit() }
         configureCommandMenuVoiceController()
         ghostCursorOverlayCoordinator = GhostCursorOverlayCoordinator(store: ghostCursorStore)
         setupGhostCursorWorkspaceObservers()
