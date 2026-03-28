@@ -207,6 +207,15 @@ final class VoiceDictationController {
         }
     }
 
+    /// Strip Whisper special tokens like <|startoftranscript|>, <|0.00|>, <|en|>, etc.
+    private static let specialTokenPattern = try! NSRegularExpression(pattern: "<\\|[^|]*\\|>")
+
+    private static func stripSpecialTokens(_ text: String) -> String {
+        specialTokenPattern.stringByReplacingMatches(
+            in: text, range: NSRange(text.startIndex..., in: text), withTemplate: ""
+        )
+    }
+
     private func handleStreamStateChange(_ newState: AudioStreamTranscriber.State) {
         // Audio level from buffer energy
         let energy = newState.bufferEnergy.last ?? 0
@@ -218,8 +227,9 @@ final class VoiceDictationController {
         let currentText = newState.currentText
         let parts = [confirmedText, unconfirmedText, currentText]
             .filter { !$0.isEmpty }
-        let combined = parts.joined(separator: " ")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let combined = Self.stripSpecialTokens(
+            parts.joined(separator: " ")
+        ).trimmingCharacters(in: .whitespacesAndNewlines)
 
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
