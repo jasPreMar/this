@@ -1,4 +1,4 @@
-// swift-tools-version: 5.9
+// swift-tools-version: 6.0
 import PackageDescription
 
 let package = Package(
@@ -11,7 +11,8 @@ let package = Package(
     targets: [
         .target(
             name: "ThisCore",
-            path: "Sources/ThisCore"
+            path: "Sources/ThisCore",
+            swiftSettings: [.swiftLanguageMode(.v5)]
         ),
         .executableTarget(
             name: "This",
@@ -30,6 +31,7 @@ let package = Package(
                 .process("Resources/StatusBarIcon@2x.png"),
                 .process("Resources/StatusBarIcon@3x.png"),
             ],
+            swiftSettings: [.swiftLanguageMode(.v5)],
             linkerSettings: [
                 .unsafeFlags([
                     "-Xlinker", "-sectcreate",
@@ -44,7 +46,18 @@ let package = Package(
         .testTarget(
             name: "ThisTests",
             dependencies: ["ThisCore"],
-            path: "Tests/ThisTests"
+            path: "Tests/ThisTests",
+            swiftSettings: [
+                .unsafeFlags(["-F", "/Library/Developer/CommandLineTools/Library/Developer/Frameworks"])
+            ],
+            linkerSettings: [
+                .unsafeFlags([
+                    "-F", "/Library/Developer/CommandLineTools/Library/Developer/Frameworks",
+                    "-framework", "Testing",
+                    "-Xlinker", "-rpath",
+                    "-Xlinker", "/Library/Developer/CommandLineTools/Library/Developer/Frameworks",
+                ])
+            ]
         ),
     ]
 )
