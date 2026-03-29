@@ -932,23 +932,8 @@ class SearchViewModel: ObservableObject {
     }
 
     private func accessibilityQueryPoints(for mouseLocation: CGPoint) -> [CGPoint] {
-        var points: [CGPoint] = []
-
-        if let screen = NSScreen.screens.first(where: { $0.frame.contains(mouseLocation) }) {
-            points.append(CGPoint(x: mouseLocation.x, y: screen.frame.maxY - mouseLocation.y))
-        }
-
-        let desktopFrame = NSScreen.screens.reduce(CGRect.null) { partialResult, screen in
-            partialResult.union(screen.frame)
-        }
-        points.append(CGPoint(x: mouseLocation.x, y: desktopFrame.maxY - mouseLocation.y))
-        points.append(mouseLocation)
-
-        var uniquePoints: [CGPoint] = []
-        for point in points where !uniquePoints.contains(point) {
-            uniquePoints.append(point)
-        }
-        return uniquePoints
+        let screenFrames = NSScreen.screens.map { $0.frame }
+        return ThisCore.accessibilityQueryPoints(mouseLocation: mouseLocation, screenFrames: screenFrames)
     }
 
     private func selfPanelHoverSnapshot(at mouseLocation: CGPoint) -> HoverSnapshot? {

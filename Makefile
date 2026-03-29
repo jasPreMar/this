@@ -4,7 +4,11 @@ USER_TCC  := $(HOME)/Library/Application Support/com.apple.TCC/TCC.db
 APP_PATH  := dist/This.app
 DMG_PATH  := dist/This.dmg
 
-.PHONY: build run sign app install dmg grant reset-tcc cert-instructions
+.PHONY: build test run sign app install dmg grant reset-tcc cert-instructions
+
+# Run regression tests
+test:
+	swift run ThisTests
 
 # Build and sign (sign only if cert exists)
 build:
