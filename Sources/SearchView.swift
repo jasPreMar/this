@@ -27,10 +27,13 @@ struct SearchView: View {
                         .scaledToFit()
                         .frame(width: 20, height: 20)
                         .clipShape(RoundedRectangle(cornerRadius: 4))
-                } else {
-                    Image(systemName: "command")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundColor(.primary)
+                } else if let appIcon = NSApp.applicationIconImage {
+                    Image(nsImage: appIcon)
+                        .resizable()
+                        .interpolation(.high)
+                        .scaledToFit()
+                        .frame(width: 20, height: 20)
+                        .clipShape(RoundedRectangle(cornerRadius: 4))
                 }
             }
             .padding(8)
