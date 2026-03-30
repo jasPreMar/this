@@ -60,6 +60,7 @@ class FloatingPanel: NSPanel {
     var onPanelDestroyed: ((FloatingPanel) -> Void)?
     var onGhostCursorIntent: ((GhostCursorIntent) -> Void)?
     var onTransitionToCommandMenu: ((FloatingPanel) -> Void)?
+    weak var highlightOverlayStore: HighlightOverlayStore?
 
     var taskDisplayTitle: String {
         let fallback = searchViewModel.query.isEmpty ? "New task" : searchViewModel.query
@@ -212,6 +213,17 @@ class FloatingPanel: NSPanel {
         searchViewModel.$isMinimalMode
             .sink { [weak self] _ in
                 self?.updateGlassCornerRadius()
+            }
+            .store(in: &cancellables)
+
+        searchViewModel.$hoveredElementFrame
+            .sink { [weak self] frame in
+                guard let self else { return }
+                if self.isVisible {
+                    self.highlightOverlayStore?.update(frame: frame)
+                } else {
+                    self.highlightOverlayStore?.clear()
+                }
             }
             .store(in: &cancellables)
     }
@@ -1152,6 +1164,7 @@ class FloatingPanel: NSPanel {
             level = .screenSaver
             restoreFloatingSurface()
         }
+        highlightOverlayStore?.clear()
         searchViewModel.query = ""
         searchViewModel.isChatMode = false
         searchViewModel.isCommandKeyMode = false

@@ -147,6 +147,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         self?.soundPlayer.playGhostCursorClick()
     })
     private var ghostCursorOverlayCoordinator: GhostCursorOverlayCoordinator?
+    private let highlightOverlayStore = HighlightOverlayStore()
+    private var highlightOverlayCoordinator: HighlightOverlayCoordinator?
     private var workspaceNotificationObservers: [NSObjectProtocol] = []
     private var hoverLoggingSession: HoverLoggingSession?
     private var defaultsObserver: NSObjectProtocol?
@@ -156,6 +158,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         AppSettings.registerDefaults()
         configureCommandMenuVoiceController()
         ghostCursorOverlayCoordinator = GhostCursorOverlayCoordinator(store: ghostCursorStore)
+        highlightOverlayCoordinator = HighlightOverlayCoordinator(store: highlightOverlayStore)
         setupGhostCursorWorkspaceObservers()
         setupMainMenu()
         updaterController = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: self, userDriverDelegate: nil)
@@ -1070,6 +1073,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             panel.dismiss(restorePreviousFocus: false)
             self.scheduleCommandMenuReveal(for: panel)
         }
+        panel.highlightOverlayStore = highlightOverlayStore
         panel.onGhostCursorIntent = { [weak self, weak panel] intent in
             guard let self, let panel else { return }
             self.ghostCursorStore.registerTask(panel.taskId, anchorPoint: panel.ghostCursorAnchorPoint)
