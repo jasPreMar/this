@@ -370,7 +370,7 @@ class FloatingPanel: NSPanel {
         orderFrontRegardless()
 
         // Dismiss on click outside (no mouse-move monitors — panel stays anchored)
-        globalClickMonitor = NSEvent.addGlobalMonitorForEvents(matching: .leftMouseDown) { [weak self] _ in
+        globalClickMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
             guard let self = self, !self.isTerminalMode else { return }
             self.dismiss(restorePreviousFocus: false)
         }
@@ -871,6 +871,9 @@ class FloatingPanel: NSPanel {
             searchViewModel.isCommandKeyMode = true
         }
         updateModifierFlags(modifierFlags)
+
+        // Immediately reposition at the current cursor location
+        positionAtCursor()
 
         // Global monitor fires when another app is frontmost; local monitor fires when we are.
         commandKeyMouseMonitor = NSEvent.addGlobalMonitorForEvents(matching: .mouseMoved) { [weak self] _ in
