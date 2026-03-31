@@ -50,6 +50,7 @@ class FloatingPanel: NSPanel {
     let taskId = UUID()
     var persistedSessionId: String?
     var isCommandKeyHeld = false
+    var isRightClickInvoked = false
     var isPinnedFollowMode: Bool { invokeHoldBehavior == .pinnedFollow }
     var onCommandKeyDropped: (() -> Void)?
     var onMessageSent: (() -> Void)?
@@ -341,7 +342,6 @@ class FloatingPanel: NSPanel {
 
     func show(at point: NSPoint) {
         searchViewModel.query = ""
-        searchViewModel.updateHoveredApp()
         isCursorFollowing = false
         restoreFloatingSurface()
 
@@ -364,8 +364,13 @@ class FloatingPanel: NSPanel {
         makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
 
+        // Query accessibility after panel is visible so the highlight overlay updates.
+        // Re-order panel to front afterward since the highlight window uses orderFrontRegardless.
+        searchViewModel.updateHoveredApp()
+        orderFrontRegardless()
+
         // Dismiss on click outside (no mouse-move monitors — panel stays anchored)
-        globalClickMonitor = NSEvent.addGlobalMonitorForEvents(matching: .leftMouseDown) { [weak self] _ in
+        globalClickMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
             guard let self = self, !self.isTerminalMode else { return }
             self.dismiss(restorePreviousFocus: false)
         }
@@ -867,6 +872,9 @@ class FloatingPanel: NSPanel {
         }
         updateModifierFlags(modifierFlags)
 
+        // Immediately reposition at the current cursor location
+        positionAtCursor()
+
         // Global monitor fires when another app is frontmost; local monitor fires when we are.
         commandKeyMouseMonitor = NSEvent.addGlobalMonitorForEvents(matching: .mouseMoved) { [weak self] _ in
             guard let self else { return }
@@ -1183,6 +1191,7 @@ class FloatingPanel: NSPanel {
         safeTriangleApex = nil
         currentModifierFlags = []
         isCommandKeyHeld = false
+        isRightClickInvoked = false
         preservesTaskHistory = false
         taskStartedAt = nil
         taskCompletedAt = nil
@@ -1227,6 +1236,7 @@ class FloatingPanel: NSPanel {
         safeTriangleApex = nil
         currentModifierFlags = []
         isCommandKeyHeld = false
+        isRightClickInvoked = false
         notifyTaskStateChanged()
 
         if restorePreviousFocus {

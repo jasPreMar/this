@@ -25,29 +25,50 @@ private func rightClickCallback(
         return Unmanaged.passRetained(event)
     }
 
-    guard type == .rightMouseDown else {
+    guard let delegate = sharedAppDelegate else {
         return Unmanaged.passRetained(event)
     }
 
-    // Only activate on Command + right click; let plain right clicks through
-    guard event.flags.contains(.maskCommand) else {
-        return Unmanaged.passRetained(event)
-    }
+    if type == .rightMouseDown {
+        let cgLocation = event.location
+        let now = ProcessInfo.processInfo.systemUptime
 
-    // Convert CG coordinates (top-left origin) to NS coordinates (bottom-left origin)
-    let cgLocation = event.location
-    if let screen = NSScreen.main {
-        let nsPoint = NSPoint(
-            x: cgLocation.x,
-            y: screen.frame.height - cgLocation.y
-        )
-        DispatchQueue.main.async {
-            sharedAppDelegate?.createNewPanel(at: nsPoint)
+        // Double right-click detection (within 0.5s)
+        if (now - delegate.lastRightClickTime) < AppDelegate.rightClickDoubleClickInterval {
+            delegate.lastRightClickTime = 0
+            delegate.rightClickLongPressTimer?.invalidate()
+            delegate.rightClickLongPressTimer = nil
+            let point = cgLocation
+            DispatchQueue.main.async {
+                delegate.showRightClickPanel(at: point)
+            }
+            return Unmanaged.passRetained(event)
         }
+
+        delegate.lastRightClickTime = now
+        delegate.lastRightClickLocation = cgLocation
+
+        // Start long-press timer
+        delegate.rightClickLongPressTimer?.invalidate()
+        let timer = Timer(timeInterval: AppDelegate.rightClickLongPressInterval, repeats: false) { _ in
+            DispatchQueue.main.async {
+                delegate.showRightClickPanel(at: delegate.lastRightClickLocation)
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        delegate.rightClickLongPressTimer = timer
+
+        return Unmanaged.passRetained(event)
     }
 
-    // Return nil to suppress the native context menu
-    return nil
+    if type == .rightMouseUp {
+        // Cancel long-press if released before threshold
+        delegate.rightClickLongPressTimer?.invalidate()
+        delegate.rightClickLongPressTimer = nil
+        return Unmanaged.passRetained(event)
+    }
+
+    return Unmanaged.passRetained(event)
 }
 
 private func commandMenuHotKeyCallback(
@@ -128,6 +149,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     private var commandKeyHeld = false
     private var lastInvokeKeyReleaseTime: TimeInterval = 0
     private static let doubleTapInterval: TimeInterval = 0.3
+    fileprivate var lastRightClickTime: TimeInterval = 0
+    fileprivate var lastRightClickLocation: CGPoint = .zero
+    fileprivate var rightClickLongPressTimer: Timer?
+    fileprivate static let rightClickDoubleClickInterval: TimeInterval = 0.5
+    fileprivate static let rightClickLongPressInterval: TimeInterval = 0.5
     private weak var commandKeyPanel: FloatingPanel?
     private let commandMenuVoiceController = VoiceDictationController()
     private var updaterController: SPUStandardUpdaterController?
@@ -218,6 +244,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
 
         if invokeKeyDown && !commandKeyHeld {
             commandKeyHeld = true
+
+            // If a right-click-invoked (fixed) panel is visible, convert it to cursor-follow mode
+            if let fixedPanel = panels.first(where: { $0.isVisible && $0.isRightClickInvoked && !$0.searchViewModel.isChatMode }) {
+                fixedPanel.isRightClickInvoked = false
+                commandKeyPanel = fixedPanel
+                fixedPanel.isCommandKeyHeld = true
+                fixedPanel.restartCommandKeyMode(with: modifierFlags)
+                startHoverLogging(using: fixedPanel.searchViewModel)
+                return
+            }
 
             let now = ProcessInfo.processInfo.systemUptime
             let isDoubleTap = (now - lastInvokeKeyReleaseTime) < Self.doubleTapInterval
@@ -907,11 +943,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
 
     private func setupRightClickTap() {
         let eventMask: CGEventMask = (1 << CGEventType.rightMouseDown.rawValue)
+            | (1 << CGEventType.rightMouseUp.rawValue)
 
         guard let tap = CGEvent.tapCreate(
             tap: .cgSessionEventTap,
             place: .headInsertEventTap,
-            options: .defaultTap,
+            options: .listenOnly,
             eventsOfInterest: eventMask,
             callback: rightClickCallback,
             userInfo: nil
@@ -1540,6 +1577,41 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         let panel = makePanel()
         panels.append(panel)
         panel.show(at: point)
+    }
+
+    /// Show a fixed (non-following) panel invoked by double-right-click or long-press right-click.
+    fileprivate func showRightClickPanel(at cgPoint: CGPoint) {
+        // Dismiss any context menu by sending Escape
+        if let escDown = CGEvent(keyboardEventSource: nil, virtualKey: 0x35, keyDown: true) {
+            escDown.post(tap: .cghidEventTap)
+        }
+        if let escUp = CGEvent(keyboardEventSource: nil, virtualKey: 0x35, keyDown: false) {
+            escUp.post(tap: .cghidEventTap)
+        }
+
+        // Brief delay to let the context menu dismiss before querying accessibility
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [self] in
+            // Convert CG coordinates (top-left origin) to NS coordinates (bottom-left origin)
+            guard let screen = NSScreen.screens.first(where: {
+                $0.frame.contains(NSPoint(x: cgPoint.x, y: $0.frame.height - cgPoint.y))
+            }) ?? NSScreen.main else { return }
+
+            let nsPoint = NSPoint(
+                x: cgPoint.x,
+                y: screen.frame.height - cgPoint.y
+            )
+
+            // Close any existing search-mode panels
+            for panel in panels where panel.isVisible && !panel.searchViewModel.isChatMode {
+                panel.dismiss(restorePreviousFocus: false)
+            }
+            panels.removeAll { !$0.isVisible && !$0.preservesTaskHistory }
+
+            let panel = makePanel()
+            panels.append(panel)
+            panel.isRightClickInvoked = true
+            panel.show(at: nsPoint)
+        }
     }
 
     /// Returns true if `remote` is a newer semantic version than `local` (e.g. "0.1.2" > "0.1.1").
