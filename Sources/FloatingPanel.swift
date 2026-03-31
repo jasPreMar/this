@@ -50,6 +50,7 @@ class FloatingPanel: NSPanel {
     let taskId = UUID()
     var persistedSessionId: String?
     var isCommandKeyHeld = false
+    var isRightClickInvoked = false
     var isPinnedFollowMode: Bool { invokeHoldBehavior == .pinnedFollow }
     var onCommandKeyDropped: (() -> Void)?
     var onMessageSent: (() -> Void)?
@@ -341,7 +342,6 @@ class FloatingPanel: NSPanel {
 
     func show(at point: NSPoint) {
         searchViewModel.query = ""
-        searchViewModel.updateHoveredApp()
         isCursorFollowing = false
         restoreFloatingSurface()
 
@@ -363,6 +363,11 @@ class FloatingPanel: NSPanel {
         prepareForTextInputFocus()
         makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+
+        // Query accessibility after panel is visible so the highlight overlay updates.
+        // Re-order panel to front afterward since the highlight window uses orderFrontRegardless.
+        searchViewModel.updateHoveredApp()
+        orderFrontRegardless()
 
         // Dismiss on click outside (no mouse-move monitors — panel stays anchored)
         globalClickMonitor = NSEvent.addGlobalMonitorForEvents(matching: .leftMouseDown) { [weak self] _ in
@@ -1183,6 +1188,7 @@ class FloatingPanel: NSPanel {
         safeTriangleApex = nil
         currentModifierFlags = []
         isCommandKeyHeld = false
+        isRightClickInvoked = false
         preservesTaskHistory = false
         taskStartedAt = nil
         taskCompletedAt = nil
@@ -1227,6 +1233,7 @@ class FloatingPanel: NSPanel {
         safeTriangleApex = nil
         currentModifierFlags = []
         isCommandKeyHeld = false
+        isRightClickInvoked = false
         notifyTaskStateChanged()
 
         if restorePreviousFocus {

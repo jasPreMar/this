@@ -92,7 +92,7 @@ private final class HighlightOverlayWindow: NSWindow {
         )
 
         isReleasedWhenClosed = false
-        level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.maximumWindow)))
+        level = NSWindow.Level(rawValue: NSWindow.Level.screenSaver.rawValue - 1)
         backgroundColor = .clear
         isOpaque = false
         ignoresMouseEvents = true
