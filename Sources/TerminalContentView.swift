@@ -574,24 +574,25 @@ enum StreamElapsedFormatting {
 
 struct InlineStreamElapsedView: View {
     let startedAt: Date
-    @State private var animateIcon = false
+    @State private var pulse = false
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 0.1)) { timeline in
-            HStack(spacing: 5) {
-                Image(systemName: "circle.grid.2x2.fill")
-                    .font(.system(size: 10))
-                    .foregroundColor(.secondary)
-                    .opacity(animateIcon ? 0.4 : 1.0)
-                    .animation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true), value: animateIcon)
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(Color.accentColor)
+                    .frame(width: 7, height: 7)
+                    .opacity(pulse ? 0.35 : 1.0)
 
                 Text(StreamElapsedFormatting.text(for: timeline.date.timeIntervalSince(startedAt)))
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(.system(size: 11))
                     .foregroundColor(.secondary)
             }
         }
         .onAppear {
-            animateIcon = true
+            withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) {
+                pulse = true
+            }
         }
     }
 }
@@ -645,7 +646,7 @@ struct ThinkingEventRow: View {
 
                 if !isExpanded {
                     Text(text)
-                        .font(.system(size: 11, design: .monospaced))
+                        .font(.system(size: 11))
                         .foregroundColor(.secondary)
                         .lineLimit(1)
                         .truncationMode(.tail)
@@ -654,11 +655,12 @@ struct ThinkingEventRow: View {
 
             if isExpanded {
                 Text(text)
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(.system(size: 11))
                     .foregroundColor(.secondary)
                     .padding(.leading, 22)
             }
         }
+        .padding(.vertical, 2)
         .contentShape(Rectangle())
         .onTapGesture { isExpanded.toggle() }
     }
@@ -670,6 +672,7 @@ struct ToolCallEventRow: View {
     let name: String
     let input: String
     @State private var isExpanded = false
+    @State private var isHovering = false
 
     var body: some View {
         Button(action: { withAnimation(.easeInOut(duration: 0.15)) { isExpanded.toggle() } }) {
@@ -686,7 +689,7 @@ struct ToolCallEventRow: View {
 
                     if !inputPreview.isEmpty {
                         Text(isExpanded ? input : inputPreview)
-                            .font(.system(size: 11, design: .monospaced))
+                            .font(.system(size: 11, design: isExpanded ? .monospaced : .default))
                             .foregroundColor(.secondary)
                             .lineLimit(isExpanded ? nil : 1)
                             .textSelection(.enabled)
@@ -699,10 +702,23 @@ struct ToolCallEventRow: View {
                     .font(.system(size: 9))
                     .foregroundColor(.secondary.opacity(0.6))
             }
-            .padding(.vertical, 3)
+            .padding(.vertical, 4)
+            .padding(.horizontal, 6)
+            .background(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(Color.primary.opacity(isHovering ? 0.04 : 0))
+            )
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .onHover { hovering in
+            isHovering = hovering
+            if hovering {
+                NSCursor.pointingHand.push()
+            } else {
+                NSCursor.pop()
+            }
+        }
     }
 
     private var inputPreview: String {
@@ -756,6 +772,7 @@ struct EventsSummaryView: View {
     let events: [StreamEvent]
     let isDone: Bool
     @State private var isExpanded = false
+    @State private var isHovering = false
 
     private var toolCallCount: Int {
         events.filter {
@@ -787,7 +804,7 @@ struct EventsSummaryView: View {
             EmptyView()
         } else if isDone {
             // Collapsed summary with expand/collapse toggle
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 8) {
                 Button(action: { withAnimation(.easeInOut(duration: 0.2)) { isExpanded.toggle() } }) {
                     HStack(spacing: 6) {
                         Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
@@ -796,15 +813,29 @@ struct EventsSummaryView: View {
                             .frame(width: 10)
 
                         Text(summaryText)
-                            .font(.system(size: 11, design: .monospaced))
+                            .font(.system(size: 11))
                             .foregroundColor(.secondary)
 
                         Image(systemName: "terminal")
                             .font(.system(size: 10))
                             .foregroundColor(.secondary)
                     }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .fill(Color.primary.opacity(isHovering ? 0.06 : 0))
+                    )
                 }
                 .buttonStyle(.plain)
+                .onHover { hovering in
+                    isHovering = hovering
+                    if hovering {
+                        NSCursor.pointingHand.push()
+                    } else {
+                        NSCursor.pop()
+                    }
+                }
 
                 if isExpanded {
                     ForEach(events) { event in
@@ -814,8 +845,10 @@ struct EventsSummaryView: View {
             }
         } else {
             // Live streaming — show all events individually
-            ForEach(events) { event in
-                eventRow(for: event)
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(events) { event in
+                    eventRow(for: event)
+                }
             }
         }
     }
@@ -885,7 +918,8 @@ extension Theme {
         }
         .code {
             FontFamilyVariant(.monospaced)
-            FontSize(.em(0.9))
+            FontSize(.em(0.88))
+            BackgroundColor(Color(.controlBackgroundColor).opacity(0.5))
         }
         .heading1 { configuration in
             configuration.label.markdownTextStyle {
@@ -909,12 +943,13 @@ extension Theme {
                 .relativeLineSpacing(.em(0.25))
                 .markdownTextStyle {
                     FontFamilyVariant(.monospaced)
-                    FontSize(.em(0.9))
+                    FontSize(.em(0.88))
                 }
-                .padding(.horizontal, 8)
-                .padding(.vertical, 6)
-                .background(Color.primary.opacity(0.06))
-                .cornerRadius(6)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.primary.opacity(0.05))
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         }
 }
 
@@ -1100,9 +1135,16 @@ struct ChatView: View {
         VStack(alignment: .leading, spacing: 8) {
             ForEach(viewModel.chatHistory) { entry in
                 if entry.role == "user" {
-                    Text("> \(entry.text)")
-                        .font(.system(size: 12, design: .monospaced))
-                        .foregroundColor(.secondary)
+                    HStack {
+                        Spacer(minLength: 40)
+                        Text(entry.text)
+                            .font(.system(size: 13))
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(Color.accentColor)
+                            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    }
                 } else {
                     EventsSummaryView(events: entry.events, isDone: true)
                     AssistantContentView(text: entry.text, structuredUI: entry.structuredUI)

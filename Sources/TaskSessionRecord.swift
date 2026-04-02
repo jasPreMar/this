@@ -17,6 +17,7 @@ final class TaskSessionRecord: ObservableObject, Identifiable {
     @Published var lastActivityAt: Date
     @Published var isWindowVisible: Bool
     @Published var isRunning: Bool
+    @Published var isUnread: Bool
 
     init(panel: FloatingPanel) {
         let startedAt = panel.taskStartedAt ?? Date()
@@ -32,6 +33,7 @@ final class TaskSessionRecord: ObservableObject, Identifiable {
         self.lastActivityAt = panel.taskLastActivityAt ?? startedAt
         self.isWindowVisible = panel.isVisible
         self.isRunning = panel.isTaskRunning
+        self.isUnread = false
     }
 
     init(persisted session: PersistedChatSession) {
@@ -47,6 +49,7 @@ final class TaskSessionRecord: ObservableObject, Identifiable {
         self.lastActivityAt = session.lastActivityAt
         self.isWindowVisible = false
         self.isRunning = false
+        self.isUnread = true
     }
 
     var searchViewModel: SearchViewModel? {

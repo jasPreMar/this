@@ -346,6 +346,8 @@ struct FocusedTextField: NSViewRepresentable {
 
     func updateNSView(_ nsView: NSScrollView, context: Context) {
         guard let textView = nsView.documentView as? NSTextView else { return }
+        // Keep the coordinator's bindings in sync when SwiftUI swaps bindings
+        context.coordinator.updateBindings(text: $text, textWidth: $textWidth, textHeight: $textHeight)
         if textView.font != font {
             textView.font = font
             context.coordinator.updateHeight()
@@ -398,6 +400,12 @@ struct FocusedTextField: NSViewRepresentable {
 
         deinit {
             detachWindowObserver()
+        }
+
+        func updateBindings(text: Binding<String>, textWidth: Binding<CGFloat>, textHeight: Binding<CGFloat>) {
+            _text = text
+            _textWidth = textWidth
+            _textHeight = textHeight
         }
 
         func textDidChange(_ notification: Notification) {
