@@ -164,11 +164,14 @@ private final class HighlightOverlayWindow: NSWindow {
     }
 
     private func localRect(for globalRect: CGRect) -> CGRect {
-        // AX coordinates: origin at top-left of primary screen, Y increases downward
-        // CALayer in window: origin at bottom-left of window, Y increases upward
-        // screenFrame: AppKit coordinates, origin at bottom-left of primary screen, Y increases upward
-        let primaryScreenHeight = NSScreen.screens.first?.frame.height ?? screenFrame.height
-        let screenTopInAX = primaryScreenHeight - screenFrame.maxY
+        // AX coordinates use a desktop-wide top-left origin. Convert through the
+        // union of all screen frames so vertically stacked and uneven displays map
+        // back into the correct per-screen window coordinates.
+        let desktopFrame = NSScreen.screens.reduce(CGRect.null) { partialResult, screen in
+            partialResult.union(screen.frame)
+        }
+        let desktopTop = desktopFrame.isNull ? screenFrame.maxY : desktopFrame.maxY
+        let screenTopInAX = desktopTop - screenFrame.maxY
         let x = globalRect.origin.x - screenFrame.minX
         // Convert from AX top-down Y to CALayer bottom-up Y
         let axLocalY = globalRect.origin.y - screenTopInAX
