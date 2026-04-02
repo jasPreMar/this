@@ -70,6 +70,7 @@ class FloatingPanel: NSPanel {
     var quickActionCoordinator: QuickActionCoordinator?
     var quickActionSurface: FastCommandSurface = .cursorPanel
     var externalInvocationSnapshot: ExternalFocusSnapshot?
+    private var recentQuickActionInvocationSnapshot: ExternalFocusSnapshot?
 
     var taskDisplayTitle: String {
         let fallback = searchViewModel.query.isEmpty ? "New task" : searchViewModel.query
@@ -496,6 +497,12 @@ class FloatingPanel: NSPanel {
     }
 
     private func currentInvocationSnapshot() -> ExternalFocusSnapshot? {
+        if let liveSnapshot = ExternalFocusInspector.captureCurrent() {
+            return liveSnapshot
+        }
+        if let recentQuickActionInvocationSnapshot {
+            return recentQuickActionInvocationSnapshot
+        }
         if let externalInvocationSnapshot {
             return externalInvocationSnapshot
         }
@@ -537,6 +544,7 @@ class FloatingPanel: NSPanel {
             hoveredParts: searchViewModel.hoveredParts,
             hoveredFileURL: searchViewModel.hoveredFileSystemURL,
             hoveredWorkingDirectoryURL: workingDirectoryURL ?? searchViewModel.hoveredWorkingDirectoryURL,
+            allowsDeicticFileTarget: searchViewModel.allowsDeicticFileTarget,
             selectedText: searchViewModel.selectedText,
             invocationSnapshot: currentInvocationSnapshot()
         )
@@ -544,6 +552,9 @@ class FloatingPanel: NSPanel {
         let outcome = quickActionCoordinator?.route(request) ?? .fallback(claudeMessage)
         switch outcome {
         case .local(let result):
+            if let snapshot = ExternalFocusInspector.captureCurrent() ?? result.resultingInvocationSnapshot {
+                recentQuickActionInvocationSnapshot = snapshot
+            }
             manager.completeLocally(result)
         case .fallback(let fallbackMessage):
             let outboundMessage = searchViewModel.bootstrapClaudeMessageForFirstClaudeTurn(

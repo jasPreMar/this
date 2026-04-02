@@ -25,6 +25,7 @@ struct QuickActionRequest {
     let hoveredParts: [String]
     let hoveredFileURL: URL?
     let hoveredWorkingDirectoryURL: URL?
+    let allowsDeicticFileTarget: Bool
     let selectedText: String
     let invocationSnapshot: ExternalFocusSnapshot?
 }
@@ -65,6 +66,7 @@ final class QuickActionCoordinator {
             hoveredParts: request.hoveredParts,
             hoveredFilePath: request.hoveredFileURL?.path,
             hoveredWorkingDirectoryPath: request.hoveredWorkingDirectoryURL?.path,
+            allowsDeicticFileTarget: request.allowsDeicticFileTarget,
             selectedText: request.selectedText,
             frontmostAppName: invocationSnapshot?.appName,
             frontmostAppBundleID: invocationSnapshot?.bundleIdentifier,

@@ -250,6 +250,28 @@ func testFastCommandRouter() {
         catalog: catalog
     )
     assert(missingHover == .fallback(.noSubject), "routerMissingHoverFallsBack")
+
+    let commandMenuHomeSeed = classifier.decide(
+        context: FastCommandContext(
+            prompt: "open this file",
+            surface: .commandMenu,
+            hoveredWorkingDirectoryPath: "/Users/tester",
+            allowsDeicticFileTarget: false
+        ),
+        catalog: catalog
+    )
+    assert(commandMenuHomeSeed == .fallback(.noSubject), "routerCommandMenuHomeSeedFallsBack")
+
+    let commandMenuCopySeed = classifier.decide(
+        context: FastCommandContext(
+            prompt: "copy this path",
+            surface: .commandMenu,
+            hoveredWorkingDirectoryPath: "/Users/tester",
+            allowsDeicticFileTarget: false
+        ),
+        catalog: catalog
+    )
+    assert(commandMenuCopySeed == .fallback(.noSubject), "routerCommandMenuCopySeedFallsBack")
 }
 
 // ─── Assistant Response Directive Tests ─────────────────────────────

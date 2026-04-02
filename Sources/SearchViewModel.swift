@@ -51,6 +51,7 @@ class SearchViewModel: ObservableObject {
     var onHoverSnapshotUpdated: ((HoverSnapshot?) -> Void)?
     var onQuickActionSubmit: ((String, URL?) -> Bool)?
     var hasStartedClaudeConversation = false
+    var allowsDeicticFileTarget = false
 
     var isVoiceModeActive: Bool {
         switch voiceState {
@@ -197,9 +198,10 @@ class SearchViewModel: ObservableObject {
         hoveredScreenPoint = nil
         hoveredWindowFrame = nil
         hoveredWorkingDirectoryURL = homeURL
-        hoveredFileSystemURL = homeURL
+        hoveredFileSystemURL = nil
         selectedText = ""
         hoveredAppPID = 0
+        allowsDeicticFileTarget = false
     }
 
     private func captureScreenshot(for targetPID: pid_t) -> (URL?, String) {
@@ -403,6 +405,8 @@ class SearchViewModel: ObservableObject {
         }
         hoveredWorkingDirectoryURL = resolveWorkingDirectory(for: resolvedElement, pid: pid)
         hoveredFileSystemURL = resolveFileSystemURL(for: resolvedElement, pid: pid)
+        allowsDeicticFileTarget = hoveredFileSystemURL != nil
+            || (hoveredWorkingDirectoryURL != nil && pid != ProcessInfo.processInfo.processIdentifier)
         hoveredElementFrame = resolvedElementFrame(for: resolvedElement)
         hoveredWindowFrame = focusedWindowFrame(for: pid)
 
@@ -922,6 +926,8 @@ class SearchViewModel: ObservableObject {
         hoveredWindowFrame = snapshot.windowFrame
         hoveredFileSystemURL = snapshot.fileSystemURL
         hoveredWorkingDirectoryURL = snapshot.workingDirectoryURL
+        allowsDeicticFileTarget = snapshot.fileSystemURL != nil
+            || (snapshot.workingDirectoryURL != nil && snapshot.processID != ProcessInfo.processInfo.processIdentifier)
         hoveredScreenPoint = snapshot.screenPoint
         selectedText = snapshot.selectedText
         onHoverSnapshotUpdated?(snapshot)
@@ -935,6 +941,7 @@ class SearchViewModel: ObservableObject {
         hoveredWindowFrame = nil
         hoveredFileSystemURL = nil
         hoveredWorkingDirectoryURL = nil
+        allowsDeicticFileTarget = false
         selectedText = ""
         hoveredAppPID = 0
         consecutiveContainerResults = 0

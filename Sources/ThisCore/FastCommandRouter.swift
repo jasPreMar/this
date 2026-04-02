@@ -28,6 +28,7 @@ public struct FastCommandContext: Equatable {
     public let hoveredParts: [String]
     public let hoveredFilePath: String?
     public let hoveredWorkingDirectoryPath: String?
+    public let allowsDeicticFileTarget: Bool
     public let selectedText: String
     public let frontmostAppName: String?
     public let frontmostAppBundleID: String?
@@ -39,6 +40,7 @@ public struct FastCommandContext: Equatable {
         hoveredParts: [String] = [],
         hoveredFilePath: String? = nil,
         hoveredWorkingDirectoryPath: String? = nil,
+        allowsDeicticFileTarget: Bool? = nil,
         selectedText: String = "",
         frontmostAppName: String? = nil,
         frontmostAppBundleID: String? = nil,
@@ -49,6 +51,8 @@ public struct FastCommandContext: Equatable {
         self.hoveredParts = hoveredParts
         self.hoveredFilePath = hoveredFilePath
         self.hoveredWorkingDirectoryPath = hoveredWorkingDirectoryPath
+        self.allowsDeicticFileTarget = allowsDeicticFileTarget
+            ?? (hoveredFilePath != nil || hoveredWorkingDirectoryPath != nil)
         self.selectedText = selectedText
         self.frontmostAppName = frontmostAppName
         self.frontmostAppBundleID = frontmostAppBundleID
@@ -248,6 +252,7 @@ public struct RuleBasedFastCommandClassifier: FastCommandClassifier {
 
         if actionResult.action == .open,
            prepared.hasDeicticReference,
+           context.allowsDeicticFileTarget,
            (context.hoveredFilePath != nil || context.hoveredWorkingDirectoryPath != nil) {
             let hoveredFileDecision = resolveFileAction(
                 context: context,
@@ -355,7 +360,8 @@ public struct RuleBasedFastCommandClassifier: FastCommandClassifier {
         prepared: PreparedPrompt,
         actionResult: ActionResult
     ) -> FastRouteDecision {
-        if prepared.hasDeicticReference || prepared.subjectQuery.isEmpty {
+        if context.allowsDeicticFileTarget,
+           (prepared.hasDeicticReference || prepared.subjectQuery.isEmpty) {
             if let hoveredFilePath = context.hoveredFilePath {
                 return makeDecision(
                     action: actionResult.action,

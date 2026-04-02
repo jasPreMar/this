@@ -6,6 +6,7 @@ struct LocalExecutionResult {
     let assistantText: String
     let eventInput: String
     let ghostCursorIntent: GhostCursorIntent?
+    let resultingInvocationSnapshot: ExternalFocusSnapshot?
 }
 
 struct LocalExecutionContext {
@@ -89,7 +90,8 @@ final class LocalCommandExecutor {
                     subject: resolution.name,
                     status: "completed"
                 ),
-                ghostCursorIntent: intent
+                ghostCursorIntent: intent,
+                resultingInvocationSnapshot: snapshot(for: resolution)
             )
         )
     }
@@ -143,7 +145,8 @@ final class LocalCommandExecutor {
                     subject: subject,
                     status: "completed"
                 ),
-                ghostCursorIntent: .focusWindow(label: text.replacingOccurrences(of: ".", with: ""))
+                ghostCursorIntent: .focusWindow(label: text.replacingOccurrences(of: ".", with: "")),
+                resultingInvocationSnapshot: snapshot(for: resolution)
             )
         )
     }
@@ -191,7 +194,8 @@ final class LocalCommandExecutor {
                     label: url.lastPathComponent,
                     path: url.path,
                     query: url.lastPathComponent
-                )
+                ),
+                resultingInvocationSnapshot: ExternalFocusInspector.captureCurrent()
             )
         )
     }
@@ -447,6 +451,28 @@ final class LocalCommandExecutor {
             return #"{"command":"quick action"}"#
         }
         return string
+    }
+
+    private func snapshot(for resolution: AppResolution) -> ExternalFocusSnapshot? {
+        let processIdentifier = resolution.processIdentifier ?? resolution.runningApplication?.processIdentifier
+        return ExternalFocusSnapshot(
+            appName: resolution.name,
+            bundleIdentifier: resolution.bundleIdentifier ?? resolution.runningApplication?.bundleIdentifier,
+            processIdentifier: processIdentifier,
+            windowTitle: processIdentifier.flatMap(ExternalFocusInspector.focusedWindowTitle)
+        )
+    }
+
+    private func snapshot(for resolution: WindowResolution) -> ExternalFocusSnapshot? {
+        var processIdentifier: pid_t = 0
+        AXUIElementGetPid(resolution.window, &processIdentifier)
+        return ExternalFocusSnapshot(
+            appName: resolution.appName ?? resolution.app?.localizedName,
+            bundleIdentifier: resolution.app?.bundleIdentifier,
+            processIdentifier: processIdentifier == 0 ? resolution.app?.processIdentifier : processIdentifier,
+            windowTitle: ExternalFocusInspector.stringAttribute("AXTitle", of: resolution.window)
+                ?? ExternalFocusInspector.stringAttribute(kAXTitleAttribute as String, of: resolution.window)
+        )
     }
 }
 
