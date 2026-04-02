@@ -139,6 +139,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     private var commandMenuPresentationSource: CommandMenuPresentationSource?
     private var commandMenuPresentationID = UUID()
     private var commandMenuOpenedAt: TimeInterval = 0
+    private var commandMenuCloseWorkItem: DispatchWorkItem?
     private var commandMenuGlobalMouseMonitor: Any?
     private var commandMenuLocalMouseMonitor: Any?
     private var onboardingWindow: NSWindow?
@@ -765,6 +766,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     }
 
     private func showCommandMenu(from source: CommandMenuPresentationSource, navigateToChat: TaskSessionRecord? = nil) {
+        commandMenuCloseWorkItem?.cancel()
+        commandMenuCloseWorkItem = nil
         commandMenuDismissing = false
         setCommandMenuChatRecord(resolvedCommandMenuChatRecord(preferred: navigateToChat))
         commandMenuPresentationSource = source
@@ -1221,13 +1224,18 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         // Keep commandMenuChatRecord alive during the animation so the
         // content freezes in place (no height collapse / placeholder swap).
         commandMenuDismissing = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
-            self?.commandMenuChatRecord = nil
-            self?.commandMenuPanel?.orderOut(nil)
-            self?.commandMenuPanel = nil
-            self?.commandMenuPresentationSource = nil
-            self?.commandMenuDismissing = false
+        commandMenuCloseWorkItem?.cancel()
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self, self.commandMenuDismissing else { return }
+            self.commandMenuChatRecord = nil
+            self.commandMenuPanel?.orderOut(nil)
+            self.commandMenuPanel = nil
+            self.commandMenuPresentationSource = nil
+            self.commandMenuDismissing = false
+            self.commandMenuCloseWorkItem = nil
         }
+        commandMenuCloseWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2, execute: workItem)
     }
 
     func handleCommandMenuBackNavigation() {

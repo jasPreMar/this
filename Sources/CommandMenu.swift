@@ -110,10 +110,7 @@ private final class CommandMenuPassthroughView: NSView {
 struct CommandMenuView: View {
     private static let panelWidth: CGFloat = 720
     private static let maxChatHeight: CGFloat = 500
-    private static let fallbackInputRowHeight: CGFloat = 54
     private static let fallbackBottomBarHeight: CGFloat = 48
-    private static let fallbackTabBarHeight: CGFloat = 44
-    private static let dividerHeight: CGFloat = 1
     private static let bottomMargin: CGFloat = 80
 
     @ObservedObject var appDelegate: AppDelegate
@@ -121,9 +118,6 @@ struct CommandMenuView: View {
     @State private var isContentVisible = false
     @State private var textWidth: CGFloat = FocusedTextField.minWidth
     @State private var textHeight: CGFloat = 20
-    @State private var inputRowHeight: CGFloat = Self.fallbackInputRowHeight
-    @State private var tabBarHeight: CGFloat = Self.fallbackTabBarHeight
-    @State private var chatContentHeight: CGFloat = 0
 
     private var usesNativeGlassSurface: Bool {
         false
@@ -153,7 +147,6 @@ struct CommandMenuView: View {
     private var activeChatRecord: TaskSessionRecord? {
         appDelegate.commandMenuChatRecord
     }
-
 
     private var hasTasks: Bool {
         !tabs.isEmpty
@@ -294,11 +287,6 @@ struct CommandMenuView: View {
                 .padding(.trailing, 12)
             }
         }
-        .reportHeight(CommandMenuTabBarHeightPreferenceKey.self)
-        .onPreferenceChange(CommandMenuTabBarHeightPreferenceKey.self) { height in
-            guard height > 0 else { return }
-            tabBarHeight = height
-        }
     }
 
     @ViewBuilder
@@ -306,10 +294,9 @@ struct CommandMenuView: View {
         if let chatRecord = activeChatRecord,
            let viewModel = chatRecord.panel?.searchViewModel {
             CommandMenuChatSection(
-                viewModel: viewModel,
-                contentHeight: $chatContentHeight
+                viewModel: viewModel
             )
-            .frame(maxHeight: Self.maxChatHeight)
+            .id(chatRecord.id)
             .clipped()
         }
     }
@@ -328,11 +315,6 @@ struct CommandMenuView: View {
             onVoice: { self.appDelegate.toggleCommandMenuVoice() },
             onKeyDown: handleInputKeyDown
         )
-        .reportHeight(CommandMenuInputRowHeightPreferenceKey.self)
-        .onPreferenceChange(CommandMenuInputRowHeightPreferenceKey.self) { height in
-            guard height > 0 else { return }
-            inputRowHeight = height
-        }
     }
 
 
@@ -527,7 +509,8 @@ private struct CommandMenuSurfaceChrome: ViewModifier {
 
 private struct CommandMenuChatSection: View {
     @ObservedObject var viewModel: SearchViewModel
-    @Binding var contentHeight: CGFloat
+    @State private var scrollContentHeight: CGFloat = 0
+    private let maxScrollAreaHeight: CGFloat = 500
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -545,6 +528,7 @@ private struct CommandMenuChatSection: View {
                     }
                 )
             }
+            .frame(height: min(max(scrollContentHeight + 16, 60), maxScrollAreaHeight))
             .onAppear {
                 proxy.scrollTo("chatBottom", anchor: .bottom)
             }
@@ -573,9 +557,9 @@ private struct CommandMenuChatSection: View {
                     proxy.scrollTo("chatBottom", anchor: .bottom)
                 }
             }
-        }
-        .onPreferenceChange(CommandMenuChatContentHeightPreferenceKey.self) { height in
-            contentHeight = height
+            .onPreferenceChange(CommandMenuChatContentHeightPreferenceKey.self) { height in
+                scrollContentHeight = height
+            }
         }
     }
 
@@ -669,15 +653,7 @@ private struct CommandMenuChatContentHeightPreferenceKey: PreferenceKey {
     static var defaultValue: CGFloat = 0
 
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = nextValue()
-    }
-}
-
-private struct CommandMenuTabBarHeightPreferenceKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = nextValue()
+        value = max(value, nextValue())
     }
 }
 
@@ -1001,15 +977,6 @@ private struct CommandMenuPinButton: View {
         .help(isPinned ? "Unpin (click outside will not dismiss)" : "Pin (keep open while clicking elsewhere)")
     }
 }
-
-private struct CommandMenuInputRowHeightPreferenceKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = nextValue()
-    }
-}
-
 
 private extension View {
     func reportHeight<Key: PreferenceKey>(_ key: Key.Type) -> some View where Key.Value == CGFloat {
