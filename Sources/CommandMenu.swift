@@ -122,7 +122,6 @@ struct CommandMenuView: View {
     @State private var textWidth: CGFloat = FocusedTextField.minWidth
     @State private var textHeight: CGFloat = 20
     @State private var inputRowHeight: CGFloat = Self.fallbackInputRowHeight
-    @State private var bottomBarHeight: CGFloat = Self.fallbackBottomBarHeight
     @State private var tabBarHeight: CGFloat = Self.fallbackTabBarHeight
     @State private var chatContentHeight: CGFloat = 0
 
@@ -155,30 +154,6 @@ struct CommandMenuView: View {
         appDelegate.commandMenuChatRecord
     }
 
-    private var footerShortcuts: [CommandMenuShortcutItem] {
-        var shortcuts: [CommandMenuShortcutItem] = []
-
-        if isExpanded {
-            if !queryIsEmpty {
-                shortcuts.append(CommandMenuShortcutItem(label: "Send", keys: ["↩"]))
-            }
-            if activeChatRecord?.isRunning == true {
-                shortcuts.append(CommandMenuShortcutItem(label: "Stop", keys: ["⌫"]))
-            }
-        } else {
-            if !queryIsEmpty {
-                shortcuts.append(CommandMenuShortcutItem(label: "Run", keys: ["↩"]))
-                shortcuts.append(CommandMenuShortcutItem(label: "Send Feedback", keys: ["⌘", "⇧", "↩"]))
-            }
-        }
-
-        let hasRunningTasks = tabs.contains(where: \.isRunning)
-        if hasRunningTasks {
-            shortcuts.append(CommandMenuShortcutItem(label: "Kill All", keys: ["⌘", "⇧", "⌫"]))
-        }
-
-        return shortcuts
-    }
 
     private var hasTasks: Bool {
         !tabs.isEmpty
@@ -189,6 +164,10 @@ struct CommandMenuView: View {
             Spacer(minLength: 0)
 
             VStack(spacing: 0) {
+                titleBar
+
+                Divider()
+
                 headerRow
 
                 Divider()
@@ -200,10 +179,6 @@ struct CommandMenuView: View {
                 }
 
                 inputRow
-
-                Divider()
-
-                bottomBar
             }
             .frame(width: Self.panelWidth)
             .modifier(CommandMenuSurfaceChrome(usesNativeGlassSurface: usesNativeGlassSurface))
@@ -240,6 +215,36 @@ struct CommandMenuView: View {
         }
     }
 
+    private var titleBar: some View {
+        HStack(spacing: 0) {
+            SettingsMenuButton(
+                onCheckForUpdates: { appDelegate.checkForUpdatesFromCommandMenu() },
+                onLeaveFeedback: { openFeedback() },
+                onSettings: { openSettings() },
+                onQuit: { appDelegate.quitFromCommandMenu() }
+            )
+            .padding(.leading, 12)
+
+            Spacer(minLength: 0)
+
+            HStack(spacing: 1) {
+                CommandMenuPinButton(isPinned: $appDelegate.commandMenuPinned)
+
+                CommandMenuMinimizeCloseButton(
+                    isExpanded: isExpanded,
+                    onMinimize: {
+                        appDelegate.handleCommandMenuBackNavigation()
+                        query = ""
+                    },
+                    onClose: { appDelegate.closeCommandMenu() }
+                )
+            }
+            .padding(.trailing, 12)
+        }
+        .frame(height: Self.fallbackBottomBarHeight)
+        .background(Color.black.opacity(0.035))
+    }
+
     private var headerRow: some View {
         HStack(spacing: 0) {
             if hasTasks {
@@ -269,36 +274,25 @@ struct CommandMenuView: View {
                 Spacer(minLength: 0)
             }
 
-            HStack(spacing: 4) {
-                if isExpanded {
-                    Button(action: {
-                        appDelegate.handleCommandMenuBackNavigation()
-                        query = ""
-                    }) {
-                        Image(systemName: "plus")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(.secondary)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 6)
-                            .background(
-                                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                    .fill(Color.clear)
-                            )
-                            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                    }
-                    .buttonStyle(.plain)
+            if isExpanded {
+                Button(action: {
+                    appDelegate.handleCommandMenuBackNavigation()
+                    query = ""
+                }) {
+                    Image(systemName: "plus")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 6)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .fill(Color.clear)
+                        )
+                        .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                 }
-
-                SettingsMenuButton(
-                    onCheckForUpdates: { appDelegate.checkForUpdatesFromCommandMenu() },
-                    onLeaveFeedback: { openFeedback() },
-                    onSettings: { openSettings() },
-                    onQuit: { appDelegate.quitFromCommandMenu() }
-                )
-
-                CommandMenuPinButton(isPinned: $appDelegate.commandMenuPinned)
+                .buttonStyle(.plain)
+                .padding(.trailing, 12)
             }
-            .padding(.trailing, 12)
         }
         .reportHeight(CommandMenuTabBarHeightPreferenceKey.self)
         .onPreferenceChange(CommandMenuTabBarHeightPreferenceKey.self) { height in
@@ -341,23 +335,6 @@ struct CommandMenuView: View {
         }
     }
 
-    private var bottomBar: some View {
-        HStack(spacing: 14) {
-            Spacer(minLength: 16)
-
-            ForEach(footerShortcuts) { shortcut in
-                CommandMenuShortcut(label: shortcut.label, keys: shortcut.keys)
-            }
-        }
-        .padding(.horizontal, 16)
-        .frame(height: Self.fallbackBottomBarHeight)
-        .background(Color.black.opacity(0.035))
-        .reportHeight(CommandMenuBottomBarHeightPreferenceKey.self)
-        .onPreferenceChange(CommandMenuBottomBarHeightPreferenceKey.self) { height in
-            guard height > 0 else { return }
-            bottomBarHeight = height
-        }
-    }
 
     private func switchToPreviousTab() {
         guard !tabs.isEmpty else { return }
@@ -823,41 +800,6 @@ private struct CommandMenuInputActionButton: View {
     }
 }
 
-private struct CommandMenuShortcut: View {
-    let label: String
-    let keys: [String]
-
-    var body: some View {
-        HStack(spacing: 8) {
-            Text(label)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(Color.primary)
-
-            HStack(spacing: 4) {
-                ForEach(keys, id: \.self) { key in
-                    Text(key)
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(Color.secondary)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 3)
-                        .background(
-                            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                .fill(Color.black.opacity(0.08))
-                        )
-                }
-            }
-        }
-    }
-}
-
-private struct CommandMenuShortcutItem: Identifiable {
-    let label: String
-    let keys: [String]
-
-    var id: String {
-        "\(label)-\(keys.joined())"
-    }
-}
 
 private final class MenuActionHandler: NSObject {
     var actions: [Int: () -> Void] = [:]
@@ -892,11 +834,19 @@ private struct SettingsMenuButton: View {
         Button {
             showMenu()
         } label: {
-            Image(systemName: "gearshape.fill")
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
+            Group {
+                if let img = Self.loadTemplateIcon() {
+                    Image(nsImage: img)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(width: 14, height: 14)
+                } else {
+                    Image(systemName: "cursorarrow.motionlines")
+                        .font(.system(size: 14, weight: .semibold))
+                }
+            }
+            .foregroundStyle(.secondary)
+            .frame(width: 32, height: 28)
         }
         .buttonStyle(SettingsMenuButtonStyle(isHovering: isHovering))
         .onHover { hovering in
@@ -914,6 +864,31 @@ private struct SettingsMenuButton: View {
             }
         }
         .background(MenuAnchorRepresentable(anchorView: $anchorView))
+    }
+
+    private static func loadTemplateIcon() -> NSImage? {
+        let candidates: [() -> NSImage?] = [
+            { Bundle.main.image(forResource: "StatusBarIcon") },
+            {
+                let url = Bundle.main.resourceURL?
+                    .appendingPathComponent("This_This.bundle")
+                    .appendingPathComponent("StatusBarIcon.png")
+                return url.flatMap { NSImage(contentsOf: $0) }
+            },
+            {
+                let url = Bundle.main.executableURL?.deletingLastPathComponent()
+                    .appendingPathComponent("This_This.bundle")
+                    .appendingPathComponent("StatusBarIcon.png")
+                return url.flatMap { NSImage(contentsOf: $0) }
+            },
+        ]
+        for candidate in candidates {
+            if let img = candidate() {
+                img.isTemplate = true
+                return img
+            }
+        }
+        return nil
     }
 
     private func showMenu() {
@@ -979,6 +954,33 @@ private struct CommandMenuContentFramePreferenceKey: PreferenceKey {
     }
 }
 
+private struct CommandMenuMinimizeCloseButton: View {
+    let isExpanded: Bool
+    let onMinimize: () -> Void
+    let onClose: () -> Void
+    @State private var isHovering = false
+
+    var body: some View {
+        Button {
+            if isExpanded {
+                onMinimize()
+            } else {
+                onClose()
+            }
+        } label: {
+            Image(systemName: isExpanded ? "minus" : "xmark")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 32, height: 28)
+        }
+        .buttonStyle(SettingsMenuButtonStyle(isHovering: isHovering))
+        .onHover { hovering in
+            isHovering = hovering
+        }
+        .help(isExpanded ? "Minimize" : "Close")
+    }
+}
+
 private struct CommandMenuPinButton: View {
     @Binding var isPinned: Bool
     @State private var isHovering = false
@@ -990,8 +992,7 @@ private struct CommandMenuPinButton: View {
             Image(systemName: isPinned ? "pin.fill" : "pin")
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(isPinned ? .primary : .secondary)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 6)
+                .frame(width: 32, height: 28)
         }
         .buttonStyle(SettingsMenuButtonStyle(isHovering: isHovering))
         .onHover { hovering in
@@ -1009,13 +1010,6 @@ private struct CommandMenuInputRowHeightPreferenceKey: PreferenceKey {
     }
 }
 
-private struct CommandMenuBottomBarHeightPreferenceKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = nextValue()
-    }
-}
 
 private extension View {
     func reportHeight<Key: PreferenceKey>(_ key: Key.Type) -> some View where Key.Value == CGFloat {
