@@ -911,7 +911,9 @@ struct PanelContentView: View {
 
     var body: some View {
         Group {
-            if viewModel.isChatMode {
+            if viewModel.isTaskIconMode {
+                SearchView(viewModel: viewModel)
+            } else if viewModel.isChatMode {
                 ChatView(viewModel: viewModel)
             } else {
                 SearchView(viewModel: viewModel)

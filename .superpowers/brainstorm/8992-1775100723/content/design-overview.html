@@ -1,0 +1,71 @@
+<h2>Task Icon Mode — Design Overview</h2>
+<p class="subtitle">After submitting from the floating panel, the panel shrinks to a persistent icon that tracks the hovered window</p>
+
+<div class="section">
+  <h3>Lifecycle</h3>
+  <div class="mockup">
+    <div class="mockup-header">State Flow</div>
+    <div class="mockup-body" style="padding: 24px; font-size: 14px; line-height: 2;">
+      <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+        <div style="background: rgba(100,150,255,0.15); padding: 8px 14px; border-radius: 8px; border: 1px solid rgba(100,150,255,0.3);">
+          <strong>Floating Panel</strong><br>
+          <span style="font-size: 12px; opacity: 0.7;">User types + submits</span>
+        </div>
+        <span style="font-size: 20px;">→</span>
+        <div style="background: rgba(255,180,50,0.15); padding: 8px 14px; border-radius: 8px; border: 1px solid rgba(255,180,50,0.3);">
+          <strong>Task Icon</strong><br>
+          <span style="font-size: 12px; opacity: 0.7;">Shrinks, sticks to window, pulses</span>
+        </div>
+        <span style="font-size: 20px;">→</span>
+        <div style="background: rgba(80,200,120,0.15); padding: 8px 14px; border-radius: 8px; border: 1px solid rgba(80,200,120,0.3);">
+          <strong>Command Menu</strong><br>
+          <span style="font-size: 12px; opacity: 0.7;">On click or task completion</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Icon States</h3>
+  <div class="split">
+    <div class="mockup">
+      <div class="mockup-header">Idle (not hovered)</div>
+      <div class="mockup-body" style="display: flex; align-items: center; justify-content: center; padding: 32px;">
+        <div style="width: 36px; height: 36px; border-radius: 10px; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.15); display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 8px rgba(0,0,0,0.2);">
+          <div style="width: 20px; height: 20px; border-radius: 4px; background: linear-gradient(135deg, #6366f1, #8b5cf6); opacity: 0.7;">
+          </div>
+        </div>
+        <div style="margin-left: 12px; font-size: 11px; opacity: 0.5;">← Pulsing opacity<br>0.4 ↔ 1.0</div>
+      </div>
+    </div>
+    <div class="mockup">
+      <div class="mockup-header">Hovered (expanded)</div>
+      <div class="mockup-body" style="display: flex; align-items: center; justify-content: center; padding: 32px;">
+        <div style="height: 36px; border-radius: 10px; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.15); display: flex; align-items: center; padding: 0 10px; gap: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.2); max-width: 280px;">
+          <div style="width: 20px; height: 20px; min-width: 20px; border-radius: 4px; background: linear-gradient(135deg, #6366f1, #8b5cf6);">
+          </div>
+          <div style="font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Running bash: git status...</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Status Text Examples</h3>
+  <div style="font-size: 13px; line-height: 2.2;">
+    <code style="background: rgba(255,255,255,0.08); padding: 3px 8px; border-radius: 4px; margin-right: 8px;">Starting...</code> when waiting<br>
+    <code style="background: rgba(255,255,255,0.08); padding: 3px 8px; border-radius: 4px; margin-right: 8px;">Thinking...</code> when thinking block active<br>
+    <code style="background: rgba(255,255,255,0.08); padding: 3px 8px; border-radius: 4px; margin-right: 8px;">Running bash</code> when tool is active<br>
+    <code style="background: rgba(255,255,255,0.08); padding: 3px 8px; border-radius: 4px; margin-right: 8px;">Reading file.swift</code> when Read tool is active<br>
+    <code style="background: rgba(255,255,255,0.08); padding: 3px 8px; border-radius: 4px; margin-right: 8px;">Done</code> when complete (briefly, before auto-opening command menu)
+  </div>
+</div>
+
+<div class="section">
+  <h3>Window Tracking</h3>
+  <p style="font-size: 13px; line-height: 1.8;">
+    At submission time, capture the <code>CGWindowID</code> of the window under the cursor and the icon's offset relative to that window's origin. A timer polls at ~0.25s to reposition the icon as the window moves. If the tracked window disappears (minimized/closed), the icon opens the command menu automatically.
+  </p>
+</div>

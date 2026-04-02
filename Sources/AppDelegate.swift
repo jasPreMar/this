@@ -1140,8 +1140,17 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         }
         panel.onTransitionToCommandMenu = { [weak self, weak panel] _ in
             guard let self, let panel else { return }
-            panel.dismiss(restorePreviousFocus: false)
-            self.markPanelEligibleForClosedCommandMenuReveal(panel)
+            let key = ObjectIdentifier(panel)
+            if panel.searchViewModel.isTaskIconMode {
+                // Task icon click — open command menu immediately with this chat
+                if let record = self.taskRecordLookup[key] {
+                    self.showCommandMenu(from: .invokeHotKey, navigateToChat: record)
+                }
+                panel.dismiss(restorePreviousFocus: false)
+            } else {
+                panel.dismiss(restorePreviousFocus: false)
+                self.markPanelEligibleForClosedCommandMenuReveal(panel)
+            }
         }
         panel.highlightOverlayStore = highlightOverlayStore
         panel.onGhostCursorIntent = { [weak self, weak panel] intent in
