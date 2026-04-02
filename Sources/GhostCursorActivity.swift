@@ -70,6 +70,20 @@ enum GhostCursorIntent {
 extension GhostCursorIntent {
     static func fromToolUse(name: String, inputJSONString: String) -> GhostCursorIntent {
         switch name.lowercased() {
+        case "quick_action":
+            let payload = toolPayload(from: inputJSONString)
+            let action = stringValue(forKeys: ["action"], in: payload)?.lowercased() ?? ""
+            let subject = stringValue(forKeys: ["subject"], in: payload) ?? "item"
+            if subject.contains("/") {
+                return .pathSearch(label: basename(subject), path: subject, query: basename(subject))
+            }
+            if action == "open" {
+                return .appLaunch(appName: basename(subject))
+            }
+            if ["focus", "minimize", "maximize", "close"].contains(action) {
+                return .focusWindow(label: subject)
+            }
+            return .genericWork(label: subject)
         case "bash":
             return parseBashIntent(from: inputJSONString)
         case "glob":

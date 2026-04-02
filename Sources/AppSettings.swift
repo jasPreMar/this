@@ -27,6 +27,7 @@ enum AppSettings {
         static let defaultModel = "defaultClaudeModel"
         static let thinkingEnabled = "defaultClaudeThinkingEnabled"
         static let fastModeEnabled = "defaultClaudeFastModeEnabled"
+        static let quickActionsEnabled = "quickActionsEnabled"
         static let ghostCursorEnabled = "ghostCursorEnabled"
         static let ghostCursorClickSoundEnabled = "ghostCursorClickSoundEnabled"
         static let ghostCursorDebugLabelsEnabled = "ghostCursorDebugLabelsEnabled"
@@ -42,6 +43,7 @@ enum AppSettings {
             Keys.defaultModel: ClaudeModelPreset.sonnet46.rawValue,
             Keys.thinkingEnabled: false,
             Keys.fastModeEnabled: false,
+            Keys.quickActionsEnabled: true,
             Keys.ghostCursorEnabled: false,
             Keys.ghostCursorClickSoundEnabled: false,
             Keys.ghostCursorDebugLabelsEnabled: false,
@@ -87,6 +89,11 @@ enum AppSettings {
     static var fastModeEnabled: Bool {
         get { UserDefaults.standard.bool(forKey: Keys.fastModeEnabled) }
         set { UserDefaults.standard.set(newValue, forKey: Keys.fastModeEnabled) }
+    }
+
+    static var quickActionsEnabled: Bool {
+        get { UserDefaults.standard.bool(forKey: Keys.quickActionsEnabled) }
+        set { UserDefaults.standard.set(newValue, forKey: Keys.quickActionsEnabled) }
     }
 
     static var ghostCursorEnabled: Bool {
@@ -162,6 +169,9 @@ final class AppSettingsStore: ObservableObject {
     @Published var fastModeEnabled: Bool {
         didSet { AppSettings.fastModeEnabled = fastModeEnabled }
     }
+    @Published var quickActionsEnabled: Bool {
+        didSet { AppSettings.quickActionsEnabled = quickActionsEnabled }
+    }
     @Published var ghostCursorEnabled: Bool {
         didSet { AppSettings.ghostCursorEnabled = ghostCursorEnabled }
     }
@@ -183,6 +193,7 @@ final class AppSettingsStore: ObservableObject {
         defaultModel = AppSettings.defaultModel
         thinkingEnabled = AppSettings.thinkingEnabled
         fastModeEnabled = AppSettings.fastModeEnabled
+        quickActionsEnabled = AppSettings.quickActionsEnabled
         ghostCursorEnabled = AppSettings.ghostCursorEnabled
         ghostCursorClickSoundEnabled = AppSettings.ghostCursorClickSoundEnabled
         ghostCursorDebugLabelsEnabled = AppSettings.ghostCursorDebugLabelsEnabled

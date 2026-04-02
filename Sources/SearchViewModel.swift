@@ -19,6 +19,7 @@ class SearchViewModel: ObservableObject {
     @Published var hoveredScreenPoint: CGPoint?
     @Published var hoveredWindowFrame: CGRect?
     @Published var hoveredWorkingDirectoryURL: URL?
+    @Published var hoveredFileSystemURL: URL?
     @Published var selectedText: String = ""
     @Published var isChatMode = false
     @Published var isCommandKeyMode = false
@@ -48,6 +49,8 @@ class SearchViewModel: ObservableObject {
     var onMessageSent: (() -> Void)?
     var onStreamingComplete: (() -> Void)?
     var onHoverSnapshotUpdated: ((HoverSnapshot?) -> Void)?
+    var onQuickActionSubmit: ((String, URL?) -> Bool)?
+    var hasStartedClaudeConversation = false
 
     var isVoiceModeActive: Bool {
         switch voiceState {
@@ -67,6 +70,13 @@ class SearchViewModel: ObservableObject {
             // Follow-up message — resume the existing session
             chatHistory.append(ChatMessage(role: "user", text: message))
             query = ""
+            if !hasStartedClaudeConversation,
+               let onQuickActionSubmit,
+               onQuickActionSubmit(message, currentSessionWorkingDirectoryURL) {
+                return
+            }
+
+            let shouldBootstrapFirstClaudeTurn = !hasStartedClaudeConversation && currentSessionId == nil
             let manager = ClaudeProcessManager()
             manager.onComplete = { [weak self] response in
                 let completedEvents = manager.events
@@ -77,11 +87,16 @@ class SearchViewModel: ObservableObject {
                 if let sid = manager.sessionId {
                     self?.currentSessionId = sid
                 }
+                self?.hasStartedClaudeConversation = true
                 self?.onStreamingComplete?()
             }
             claudeManager = manager
-            manager.start(
-                message: message,
+            hasStartedClaudeConversation = true
+            let outboundMessage = shouldBootstrapFirstClaudeTurn
+                ? bootstrapClaudeMessageForFirstClaudeTurn(currentUserText: message, claudePrompt: message)
+                : message
+            manager.startClaude(
+                message: outboundMessage,
                 resumeSessionId: currentSessionId,
                 workingDirectoryURL: currentSessionWorkingDirectoryURL
             )
@@ -131,6 +146,34 @@ class SearchViewModel: ObservableObject {
         return lines.joined(separator: "\n")
     }
 
+    func bootstrapClaudeMessageForFirstClaudeTurn(currentUserText: String, claudePrompt: String) -> String {
+        let transcript = localTranscriptForBootstrap(excludingTrailingUserText: currentUserText)
+        guard !transcript.isEmpty else { return claudePrompt }
+
+        return """
+        Continue this task. Previous local quick-action transcript:
+
+        \(transcript)
+
+        Current request:
+        \(claudePrompt)
+        """
+    }
+
+    private func localTranscriptForBootstrap(excludingTrailingUserText currentUserText: String) -> String {
+        var messages = chatHistory
+        if let last = messages.last, last.role == "user", last.text == currentUserText {
+            messages.removeLast()
+        }
+
+        let lines = messages.compactMap { message -> String? in
+            let trimmed = message.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return nil }
+            return "\(message.role.capitalized): \(trimmed)"
+        }
+        return lines.joined(separator: "\n")
+    }
+
     func captureHoveredWindowScreenshot() -> (URL?, String) {
         captureScreenshot(for: hoveredAppPID)
     }
@@ -154,6 +197,7 @@ class SearchViewModel: ObservableObject {
         hoveredScreenPoint = nil
         hoveredWindowFrame = nil
         hoveredWorkingDirectoryURL = homeURL
+        hoveredFileSystemURL = homeURL
         selectedText = ""
         hoveredAppPID = 0
     }
@@ -358,6 +402,7 @@ class SearchViewModel: ObservableObject {
             hoveredContextIcon = nil
         }
         hoveredWorkingDirectoryURL = resolveWorkingDirectory(for: resolvedElement, pid: pid)
+        hoveredFileSystemURL = resolveFileSystemURL(for: resolvedElement, pid: pid)
         hoveredElementFrame = resolvedElementFrame(for: resolvedElement)
         hoveredWindowFrame = focusedWindowFrame(for: pid)
 
@@ -383,6 +428,7 @@ class SearchViewModel: ObservableObject {
             elementFrame: hoveredElementFrame,
             windowFrame: hoveredWindowFrame,
             screenPoint: hoveredScreenPoint,
+            fileSystemURL: hoveredFileSystemURL,
             workingDirectoryURL: hoveredWorkingDirectoryURL
         )
         if shouldPreferSelfPanelSnapshot(for: resolvedElement, description: description, at: mouseLocation),
@@ -694,6 +740,24 @@ class SearchViewModel: ObservableObject {
         return nil
     }
 
+    private func resolveFileSystemURL(for element: AXUIElement, pid: pid_t) -> URL? {
+        let (primary, ancestors) = resolveElement(element)
+
+        for candidate in [primary, element] + ancestors {
+            if let url = localFilesystemURL(from: candidate) {
+                return url.standardizedFileURL.resolvingSymlinksInPath()
+            }
+        }
+
+        let appElement = AXUIElementCreateApplication(pid)
+        if let focusedWindow = axValue(appElement, key: kAXFocusedWindowAttribute),
+           let url = localFilesystemURL(from: focusedWindow as! AXUIElement) {
+            return url.standardizedFileURL.resolvingSymlinksInPath()
+        }
+
+        return nil
+    }
+
     private func localFilesystemURL(from element: AXUIElement) -> URL? {
         if let url = axValue(element, key: "AXURL") as? URL, url.isFileURL {
             return url
@@ -856,6 +920,7 @@ class SearchViewModel: ObservableObject {
         hoveredContextIcon = icon
         hoveredElementFrame = snapshot.elementFrame
         hoveredWindowFrame = snapshot.windowFrame
+        hoveredFileSystemURL = snapshot.fileSystemURL
         hoveredWorkingDirectoryURL = snapshot.workingDirectoryURL
         hoveredScreenPoint = snapshot.screenPoint
         selectedText = snapshot.selectedText
@@ -868,6 +933,7 @@ class SearchViewModel: ObservableObject {
         hoveredContextIcon = nil
         hoveredElementFrame = nil
         hoveredWindowFrame = nil
+        hoveredFileSystemURL = nil
         hoveredWorkingDirectoryURL = nil
         selectedText = ""
         hoveredAppPID = 0
@@ -959,6 +1025,7 @@ class SearchViewModel: ObservableObject {
             elementFrame: nil,
             windowFrame: nil,
             screenPoint: mouseLocation,
+            fileSystemURL: desktopURL,
             workingDirectoryURL: desktopURL
         )
     }

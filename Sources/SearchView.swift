@@ -246,7 +246,7 @@ struct PanelInputRow: View {
                 .padding(.top, 1)
 
             if let manager = viewModel.claudeManager,
-               manager.status == .streaming {
+               manager.status.isActive {
                 Button(action: {
                     manager.stop()
                 }) {

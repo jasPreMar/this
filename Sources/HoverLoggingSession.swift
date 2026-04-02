@@ -10,6 +10,7 @@ struct HoverSnapshot: Equatable {
     let elementFrame: CGRect?
     let windowFrame: CGRect?
     let screenPoint: CGPoint?
+    let fileSystemURL: URL?
     let workingDirectoryURL: URL?
 
     var identityKey: String {
