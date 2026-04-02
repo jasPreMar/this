@@ -4,6 +4,7 @@ import ApplicationServices
 import Carbon
 import Sparkle
 import WebKit
+import ThisCore
 
 // Global reference for CGEventTap callback (C function pointers can't capture context)
 private weak var sharedAppDelegate: AppDelegate?
@@ -1348,9 +1349,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
               let record = taskRecordLookup[key] else { return }
 
         let wasEligibleForReveal = panelsEligibleForClosedCommandMenuReveal.remove(key) != nil
-        let shouldRevealNow = wasEligibleForReveal &&
-            panel.lastCompletedCommandMenuAction == .reveal &&
-            commandMenuPanel?.isVisible != true
+        let shouldRevealNow = shouldRevealCommandMenuOnCompletion(
+            isEligibleForReveal: wasEligibleForReveal,
+            completionAction: panel.lastCompletedCommandMenuAction,
+            isCommandMenuVisible: commandMenuPanel?.isVisible == true,
+            isCommandMenuDismissing: commandMenuDismissing
+        )
 
         if shouldRevealNow {
             record.isUnread = false

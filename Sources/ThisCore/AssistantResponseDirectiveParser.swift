@@ -21,6 +21,16 @@ public struct AssistantResponseDirectiveParseResult {
     }
 }
 
+public func shouldRevealCommandMenuOnCompletion(
+    isEligibleForReveal: Bool,
+    completionAction: CommandMenuCompletionAction,
+    isCommandMenuVisible: Bool,
+    isCommandMenuDismissing: Bool
+) -> Bool {
+    guard isEligibleForReveal, completionAction == .reveal else { return false }
+    return !isCommandMenuVisible || isCommandMenuDismissing
+}
+
 public enum AssistantResponseDirectiveParser {
     private static let plainTextDirectivePrefix = "[[HP_COMMAND_MENU:"
     private static let plainTextDirectiveSuffix = "]]"
@@ -47,11 +57,7 @@ public enum AssistantResponseDirectiveParser {
             trimmed = String(trimmed.dropLast(3)).trimmingCharacters(in: .whitespacesAndNewlines)
         }
 
-        guard trimmed.first == "{", trimmed.last == "}" else {
-            return nil
-        }
-
-        return trimmed
+        return firstBalancedJSONObjectString(from: trimmed)
     }
 
     private static func parseStructuredUIResponse(_ jsonText: String) -> AssistantResponseDirectiveParseResult? {
@@ -133,5 +139,45 @@ public enum AssistantResponseDirectiveParser {
         }
 
         return string
+    }
+
+    private static func firstBalancedJSONObjectString(from text: String) -> String? {
+        guard let start = text.firstIndex(of: "{") else { return nil }
+
+        var depth = 0
+        var inString = false
+        var escaped = false
+
+        for index in text[start...].indices {
+            let character = text[index]
+
+            if escaped {
+                escaped = false
+                continue
+            }
+
+            if character == "\\" && inString {
+                escaped = true
+                continue
+            }
+
+            if character == "\"" {
+                inString.toggle()
+                continue
+            }
+
+            if inString { continue }
+
+            if character == "{" {
+                depth += 1
+            } else if character == "}" {
+                depth -= 1
+                if depth == 0 {
+                    return String(text[start...index])
+                }
+            }
+        }
+
+        return nil
     }
 }

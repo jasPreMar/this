@@ -196,6 +196,54 @@ func testAssistantResponseDirectives() {
            "structuredPreserveIsExplicit")
     assert(!structuredPreserve.sanitizedText.contains("_hpCommandMenu"),
            "structuredPreserveRemovesMetadataKey")
+
+    let structuredWithPreamble = AssistantResponseDirectiveParser.parse("""
+    Sure.
+    {"_hpCommandMenu":"reveal","layout":{"type":"text","content":"Done"},"spoken_summary":"Done","title":"Task"}
+    """)
+    assert(structuredWithPreamble.completionAction == .reveal,
+           "structuredWithPreambleParsesRevealAction")
+    assert(structuredWithPreamble.hasExplicitDirective,
+           "structuredWithPreambleIsExplicit")
+    assert(structuredWithPreamble.sanitizedText.hasPrefix("{"),
+           "structuredWithPreambleExtractsJSONObject")
+    assert(!structuredWithPreamble.sanitizedText.contains("_hpCommandMenu"),
+           "structuredWithPreambleRemovesMetadataKey")
+
+    assert(shouldRevealCommandMenuOnCompletion(
+        isEligibleForReveal: true,
+        completionAction: .reveal,
+        isCommandMenuVisible: false,
+        isCommandMenuDismissing: false
+    ), "revealPolicyShowsWhenMenuIsClosed")
+
+    assert(!shouldRevealCommandMenuOnCompletion(
+        isEligibleForReveal: true,
+        completionAction: .reveal,
+        isCommandMenuVisible: true,
+        isCommandMenuDismissing: false
+    ), "revealPolicyDoesNotStealVisibleMenu")
+
+    assert(shouldRevealCommandMenuOnCompletion(
+        isEligibleForReveal: true,
+        completionAction: .reveal,
+        isCommandMenuVisible: true,
+        isCommandMenuDismissing: true
+    ), "revealPolicyShowsDuringDismissAnimation")
+
+    assert(!shouldRevealCommandMenuOnCompletion(
+        isEligibleForReveal: false,
+        completionAction: .reveal,
+        isCommandMenuVisible: false,
+        isCommandMenuDismissing: false
+    ), "revealPolicyRequiresEligibility")
+
+    assert(!shouldRevealCommandMenuOnCompletion(
+        isEligibleForReveal: true,
+        completionAction: .preserve,
+        isCommandMenuVisible: false,
+        isCommandMenuDismissing: false
+    ), "revealPolicyHonorsPreserve")
 }
 
 // ─── Entry Point ─────────────────────────────────────────────────────
