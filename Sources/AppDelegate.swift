@@ -144,7 +144,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     private var commandMenuLocalMouseMonitor: Any?
     private var onboardingWindow: NSWindow?
     private var settingsWindow: NSWindow?
-    private var panelsPendingCommandMenuReveal: Set<ObjectIdentifier> = []
+    private var panelsEligibleForClosedCommandMenuReveal: Set<ObjectIdentifier> = []
     private var commandKeyHeld = false
     private var lastInvokeKeyReleaseTime: TimeInterval = 0
     private static let doubleTapInterval: TimeInterval = 0.3
@@ -1080,7 +1080,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             }
             guard let self, let panel else { return }
             self.ghostCursorStore.setTaskVisible(panel.taskId, visible: false)
-            self.presentCompletedTaskInCommandMenuIfNeeded(for: panel)
+            self.handleCompletedTaskVisibilityIfNeeded(for: panel)
         }
         panel.onPersistentTaskStarted = { [weak self, weak panel] _ in
             guard let self, let panel else { return }
@@ -1095,7 +1095,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             if !panel.isTaskRunning {
                 self.ghostCursorStore.setTaskVisible(panel.taskId, visible: false)
             }
-            self.presentCompletedTaskInCommandMenuIfNeeded(for: panel)
+            self.handleCompletedTaskVisibilityIfNeeded(for: panel)
         }
         panel.onPanelDestroyed = { [weak self, weak panel] _ in
             guard let self, let panel else { return }
@@ -1121,21 +1121,22 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
                 // No chat open — launch a new task via command menu.
                 // Use startHeadless directly to avoid double-wrapping context.
                 let newPanel = self.makePanel()
-                self.scheduleCommandMenuReveal(for: newPanel)
-                self.closeCommandMenu()
                 self.panels.append(newPanel)
                 newPanel.searchViewModel.query = contextMessage
                 newPanel.startHeadless(
                     message: contextMessage,
                     workingDirectoryURL: vm.hoveredWorkingDirectoryURL
                 )
+                if let record = self.taskRecordLookup[ObjectIdentifier(newPanel)] {
+                    self.openTaskRecord(record)
+                }
             }
             return true
         }
         panel.onTransitionToCommandMenu = { [weak self, weak panel] _ in
             guard let self, let panel else { return }
             panel.dismiss(restorePreviousFocus: false)
-            self.scheduleCommandMenuReveal(for: panel)
+            self.markPanelEligibleForClosedCommandMenuReveal(panel)
         }
         panel.highlightOverlayStore = highlightOverlayStore
         panel.onGhostCursorIntent = { [weak self, weak panel] intent in
@@ -1164,12 +1165,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     @discardableResult
     func launchTaskFromCommandMenu(query: String) -> TaskSessionRecord? {
         let panel = makePanel()
-        scheduleCommandMenuReveal(for: panel)
-        closeCommandMenu()
         panels.append(panel)
         panel.startTaskFromMenuHeadless(query: query)
         let key = ObjectIdentifier(panel)
-        return taskRecordLookup[key]
+        guard let record = taskRecordLookup[key] else { return nil }
+        openTaskRecord(record)
+        return record
     }
 
     func openTaskRecord(_ record: TaskSessionRecord) {
@@ -1311,7 +1312,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         panels.removeAll { $0 === panel }
 
         let key = ObjectIdentifier(panel)
-        panelsPendingCommandMenuReveal.remove(key)
+        panelsEligibleForClosedCommandMenuReveal.remove(key)
         if let record = taskRecordLookup.removeValue(forKey: key) {
             // Keep the record in the list if it has a persisted session on disk
             if let persistedId = panel.persistedSessionId {
@@ -1336,20 +1337,28 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         taskRecords.sort { $0.startedAt < $1.startedAt }
     }
 
-    private func scheduleCommandMenuReveal(for panel: FloatingPanel) {
+    private func markPanelEligibleForClosedCommandMenuReveal(_ panel: FloatingPanel) {
         let key = ObjectIdentifier(panel)
-        panelsPendingCommandMenuReveal.insert(key)
-        presentCompletedTaskInCommandMenuIfNeeded(for: panel)
+        panelsEligibleForClosedCommandMenuReveal.insert(key)
     }
 
-    private func presentCompletedTaskInCommandMenuIfNeeded(for panel: FloatingPanel) {
+    private func handleCompletedTaskVisibilityIfNeeded(for panel: FloatingPanel) {
         let key = ObjectIdentifier(panel)
-        guard panelsPendingCommandMenuReveal.contains(key),
-              panel.taskCompletedAt != nil,
+        guard panel.taskCompletedAt != nil,
               let record = taskRecordLookup[key] else { return }
 
-        panelsPendingCommandMenuReveal.remove(key)
-        showCommandMenu(from: .invokeHotKey, navigateToChat: record)
+        let wasEligibleForReveal = panelsEligibleForClosedCommandMenuReveal.remove(key) != nil
+        let shouldRevealNow = wasEligibleForReveal &&
+            panel.lastCompletedCommandMenuAction == .reveal &&
+            commandMenuPanel?.isVisible != true
+
+        if shouldRevealNow {
+            record.isUnread = false
+            showCommandMenu(from: .invokeHotKey, navigateToChat: record)
+        } else {
+            record.isUnread = !isTaskCurrentlyVisibleToUser(record)
+            objectWillChange.send()
+        }
     }
 
     private func setCommandMenuChatRecord(_ record: TaskSessionRecord?) {
@@ -1375,6 +1384,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
 
         ensureTaskHasLivePanel(rememberedRecord)
         return rememberedRecord
+    }
+
+    private func isTaskCurrentlyVisibleToUser(_ record: TaskSessionRecord) -> Bool {
+        if record.panel?.isVisible == true {
+            return true
+        }
+
+        return commandMenuPanel?.isVisible == true && commandMenuChatRecord?.id == record.id
     }
 
     private func selectedVisiblePanel() -> FloatingPanel? {
