@@ -2,6 +2,7 @@ import AppKit
 import SwiftUI
 import Combine
 import MarkdownUI
+import ThisCore
 
 // MARK: - Stream Event Models
 
@@ -72,6 +73,7 @@ class ClaudeProcessManager: ObservableObject {
     var onStatusChange: ((StreamStatus) -> Void)?
     var onToolActivity: ((GhostCursorIntent) -> Void)?
     var sessionId: String?
+    var completionAction: CommandMenuCompletionAction = .reveal
 
     private var process: Process?
     private var buffer = Data()
@@ -210,6 +212,21 @@ class ClaudeProcessManager: ObservableObject {
             or act on it. If they highlight text, work with that text.
             - Prefer action over explanation. If the intent is clear, just do it.
             - When the task is ambiguous, give a short answer and offer to do more.
+
+            ## Command Menu Visibility Directive
+
+            Every final response must tell the app whether the command menu should open when the \
+            task finishes.
+            - Use `REVEAL` when the user needs to read the response: explanations, questions, \
+            summaries, errors, or anything non-obvious.
+            - Use `PRESERVE` only when you completed a self-evident action and the result is \
+            already obvious from the Mac UI itself.
+            - For plain-text responses, the last non-empty line must be exactly one of:
+              `[[HP_COMMAND_MENU:REVEAL]]`
+              `[[HP_COMMAND_MENU:PRESERVE]]`
+            - For structured UI JSON responses, include a top-level `_hpCommandMenu` field with \
+            value `reveal` or `preserve`.
+            - Never mention this directive anywhere except that hidden footer or JSON field.
             """
 
         if AppSettings.structuredUIEnabled {
@@ -228,6 +245,7 @@ class ClaudeProcessManager: ObservableObject {
             {
               "title": "Short title for the response",
               "spoken_summary": "A brief plain-text summary for accessibility/TTS",
+              "_hpCommandMenu": "reveal",
               "layout": <UINode>
             }
             ```
@@ -429,15 +447,13 @@ class ClaudeProcessManager: ObservableObject {
             if let sid = json["session_id"] as? String {
                 DispatchQueue.main.async { self.sessionId = sid }
             }
-            accumulated = result
-            // Try parsing complete result as structured UI (strip code fences if present)
+            let parsed = AssistantResponseDirectiveParser.parse(result)
+            accumulated = parsed.sanitizedText
+            completionAction = parsed.completionAction
             if AppSettings.structuredUIEnabled {
-                let stripped = Self.stripCodeFences(result)
-                if let jsonData = stripped.data(using: .utf8),
-                   let response = try? JSONDecoder().decode(UIResponse.self, from: jsonData) {
-                    DispatchQueue.main.async {
-                        self.structuredUIResponse = response
-                    }
+                let structuredUI = Self.decodeStructuredUI(from: parsed.sanitizedText)
+                DispatchQueue.main.async {
+                    self.structuredUIResponse = structuredUI
                 }
             }
             return accumulated
@@ -474,15 +490,12 @@ class ClaudeProcessManager: ObservableObject {
                     }
                 } else if blockType == "text",
                           let text = block["text"] as? String {
-                    accumulated = text
-                    // Try parsing as structured UI JSON when enabled (strip code fences if present)
+                    let parsed = AssistantResponseDirectiveParser.parse(text)
+                    accumulated = parsed.sanitizedText
                     if AppSettings.structuredUIEnabled {
-                        let stripped = Self.stripCodeFences(text)
-                        if let jsonData = stripped.data(using: .utf8),
-                           let response = try? JSONDecoder().decode(UIResponse.self, from: jsonData) {
-                            DispatchQueue.main.async {
-                                self.structuredUIResponse = response
-                            }
+                        let structuredUI = Self.decodeStructuredUI(from: parsed.sanitizedText)
+                        DispatchQueue.main.async {
+                            self.structuredUIResponse = structuredUI
                         }
                     }
                 }
@@ -518,47 +531,14 @@ class ClaudeProcessManager: ObservableObject {
 
         return nil
     }
-    /// Extract JSON from LLM output, handling code fences and preamble text
-    static func stripCodeFences(_ text: String) -> String {
-        var s = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        // Remove opening code fence: ```json or ```
-        if s.hasPrefix("```") {
-            if let newlineIndex = s.firstIndex(of: "\n") {
-                s = String(s[s.index(after: newlineIndex)...])
-            }
-        }
-        // Remove closing code fence
-        if s.hasSuffix("```") {
-            s = String(s.dropLast(3))
-        }
-        s = s.trimmingCharacters(in: .whitespacesAndNewlines)
-        // If it's already valid-looking JSON, return it
-        if s.hasPrefix("{") { return s }
-        // Otherwise, extract the first top-level JSON object (handles preamble text)
-        return extractJSON(from: s) ?? s
-    }
 
-    /// Find the first balanced top-level JSON object in a string
-    private static func extractJSON(from text: String) -> String? {
-        guard let start = text.firstIndex(of: "{") else { return nil }
-        var depth = 0
-        var inString = false
-        var escaped = false
-        var end: String.Index?
-        for i in text[start...].indices {
-            let c = text[i]
-            if escaped { escaped = false; continue }
-            if c == "\\" && inString { escaped = true; continue }
-            if c == "\"" { inString.toggle(); continue }
-            if inString { continue }
-            if c == "{" { depth += 1 }
-            else if c == "}" {
-                depth -= 1
-                if depth == 0 { end = i; break }
-            }
+    private static func decodeStructuredUI(from text: String) -> UIResponse? {
+        guard let jsonText = AssistantResponseDirectiveParser.wholeResponseJSONObjectString(from: text),
+              let jsonData = jsonText.data(using: .utf8) else {
+            return nil
         }
-        guard let e = end else { return nil }
-        return String(text[start...e])
+
+        return try? JSONDecoder().decode(UIResponse.self, from: jsonData)
     }
 
     func stop() {
@@ -613,6 +593,7 @@ class ClaudeProcessManager: ObservableObject {
         activeToolStartTime = nil
         currentStreamStartedAt = nil
         structuredUIResponse = nil
+        completionAction = .reveal
         isStopped = false
         accumulated = ""
         buffer = Data()

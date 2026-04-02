@@ -48,6 +48,7 @@ class FloatingPanel: NSPanel {
     private(set) var taskCompletedAt: Date?
     private(set) var taskLastActivityAt: Date?
     private(set) var preservesTaskHistory = false
+    private(set) var lastCompletedCommandMenuAction: CommandMenuCompletionAction = .reveal
     let taskId = UUID()
     var persistedSessionId: String?
     var isCommandKeyHeld = false
@@ -183,6 +184,7 @@ class FloatingPanel: NSPanel {
             self?.onMessageSent?()
         }
         searchViewModel.onStreamingComplete = { [weak self] in
+            self?.lastCompletedCommandMenuAction = self?.searchViewModel.claudeManager?.completionAction ?? .reveal
             self?.markTaskActivity(completed: true)
             self?.onStreamingComplete?()
         }
@@ -815,13 +817,16 @@ class FloatingPanel: NSPanel {
             taskCompletedAt = nil
             taskLastActivityAt = Date()
         case .waiting:
+            lastCompletedCommandMenuAction = .reveal
             taskCompletedAt = nil
             taskLastActivityAt = Date()
         case .streaming:
+            lastCompletedCommandMenuAction = .reveal
             taskCompletedAt = nil
             taskLastActivityAt = Date()
             onStreamingBegan?()
         case .done, .error:
+            lastCompletedCommandMenuAction = searchViewModel.claudeManager?.completionAction ?? .reveal
             let now = Date()
             taskCompletedAt = now
             taskLastActivityAt = now
