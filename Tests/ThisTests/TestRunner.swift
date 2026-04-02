@@ -133,6 +133,119 @@ func testElectronGroupDrilling() {
     assert(findBestChild(in: root8) == nil, "scansUpToTwentyChildren")
 }
 
+// ─── Assistant Response Directive Tests ─────────────────────────────
+
+func testAssistantResponseDirectives() {
+    let revealText = AssistantResponseDirectiveParser.parse("""
+    Finished opening Finder.
+    [[HP_COMMAND_MENU:REVEAL]]
+    """)
+    assert(revealText.sanitizedText == "Finished opening Finder.",
+           "revealDirectiveSanitizesPlainText")
+    assert(revealText.completionAction == .reveal,
+           "revealDirectiveParsesRevealAction")
+    assert(revealText.hasExplicitDirective,
+           "revealDirectiveIsExplicit")
+
+    let preserveText = AssistantResponseDirectiveParser.parse("""
+    Moved the file into Downloads.
+    [[HP_COMMAND_MENU:PRESERVE]]
+    """)
+    assert(preserveText.sanitizedText == "Moved the file into Downloads.",
+           "preserveDirectiveSanitizesPlainText")
+    assert(preserveText.completionAction == .preserve,
+           "preserveDirectiveParsesPreserveAction")
+    assert(preserveText.hasExplicitDirective,
+           "preserveDirectiveIsExplicit")
+
+    let noDirective = AssistantResponseDirectiveParser.parse("Opened Notes.")
+    assert(noDirective.sanitizedText == "Opened Notes.",
+           "missingDirectiveLeavesTextUntouched")
+    assert(noDirective.completionAction == .reveal,
+           "missingDirectiveDefaultsToReveal")
+    assert(!noDirective.hasExplicitDirective,
+           "missingDirectiveIsNotExplicit")
+
+    let malformedDirective = AssistantResponseDirectiveParser.parse("""
+    Opened Calculator.
+    [[HP_COMMAND_MENU:SOMETHING_ELSE]]
+    """)
+    assert(malformedDirective.sanitizedText == "Opened Calculator.",
+           "malformedDirectiveIsStripped")
+    assert(malformedDirective.completionAction == .reveal,
+           "malformedDirectiveDefaultsToReveal")
+    assert(!malformedDirective.hasExplicitDirective,
+           "malformedDirectiveIsNotExplicit")
+
+    let structuredReveal = AssistantResponseDirectiveParser.parse("""
+    {"_hpCommandMenu":"reveal","layout":{"type":"text","content":"Done"},"spoken_summary":"Done","title":"Task"}
+    """)
+    assert(structuredReveal.completionAction == .reveal,
+           "structuredRevealParsesRevealAction")
+    assert(structuredReveal.hasExplicitDirective,
+           "structuredRevealIsExplicit")
+    assert(!structuredReveal.sanitizedText.contains("_hpCommandMenu"),
+           "structuredRevealRemovesMetadataKey")
+
+    let structuredPreserve = AssistantResponseDirectiveParser.parse("""
+    {"_hpCommandMenu":"preserve","layout":{"type":"text","content":"Done"},"spoken_summary":"Done","title":"Task"}
+    """)
+    assert(structuredPreserve.completionAction == .preserve,
+           "structuredPreserveParsesPreserveAction")
+    assert(structuredPreserve.hasExplicitDirective,
+           "structuredPreserveIsExplicit")
+    assert(!structuredPreserve.sanitizedText.contains("_hpCommandMenu"),
+           "structuredPreserveRemovesMetadataKey")
+
+    let structuredWithPreamble = AssistantResponseDirectiveParser.parse("""
+    Sure.
+    {"_hpCommandMenu":"reveal","layout":{"type":"text","content":"Done"},"spoken_summary":"Done","title":"Task"}
+    """)
+    assert(structuredWithPreamble.completionAction == .reveal,
+           "structuredWithPreambleParsesRevealAction")
+    assert(structuredWithPreamble.hasExplicitDirective,
+           "structuredWithPreambleIsExplicit")
+    assert(structuredWithPreamble.sanitizedText.hasPrefix("{"),
+           "structuredWithPreambleExtractsJSONObject")
+    assert(!structuredWithPreamble.sanitizedText.contains("_hpCommandMenu"),
+           "structuredWithPreambleRemovesMetadataKey")
+
+    assert(shouldRevealCommandMenuOnCompletion(
+        isEligibleForReveal: true,
+        completionAction: .reveal,
+        isCommandMenuVisible: false,
+        isCommandMenuDismissing: false
+    ), "revealPolicyShowsWhenMenuIsClosed")
+
+    assert(!shouldRevealCommandMenuOnCompletion(
+        isEligibleForReveal: true,
+        completionAction: .reveal,
+        isCommandMenuVisible: true,
+        isCommandMenuDismissing: false
+    ), "revealPolicyDoesNotStealVisibleMenu")
+
+    assert(shouldRevealCommandMenuOnCompletion(
+        isEligibleForReveal: true,
+        completionAction: .reveal,
+        isCommandMenuVisible: true,
+        isCommandMenuDismissing: true
+    ), "revealPolicyShowsDuringDismissAnimation")
+
+    assert(!shouldRevealCommandMenuOnCompletion(
+        isEligibleForReveal: false,
+        completionAction: .reveal,
+        isCommandMenuVisible: false,
+        isCommandMenuDismissing: false
+    ), "revealPolicyRequiresEligibility")
+
+    assert(!shouldRevealCommandMenuOnCompletion(
+        isEligibleForReveal: true,
+        completionAction: .preserve,
+        isCommandMenuVisible: false,
+        isCommandMenuDismissing: false
+    ), "revealPolicyHonorsPreserve")
+}
+
 // ─── Entry Point ─────────────────────────────────────────────────────
 
 func output(_ s: String) {
@@ -148,6 +261,7 @@ struct RegressionTests {
         testCoordinateConversion()
         testRoleSets()
         testElectronGroupDrilling()
+        testAssistantResponseDirectives()
 
         output("")
         output("━━━ Regression Tests ━━━")
