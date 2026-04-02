@@ -118,9 +118,6 @@ private func commandMenuCarbonHotKeyHandler(
 }
 
 class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
-    private static let commandMenuPanelWidth: CGFloat = 720
-    private static let commandMenuExpandedHeight: CGFloat = 520
-    private static let commandMenuCollapsedHeight: CGFloat = 104
 
     fileprivate enum CommandMenuPresentationSource {
         case statusItem
@@ -141,6 +138,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     private var commandMenuPanel: CommandMenuPanel?
     private var commandMenuPresentationSource: CommandMenuPresentationSource?
     private var commandMenuPresentationID = UUID()
+    private var commandMenuOpenedAt: TimeInterval = 0
     private var commandMenuGlobalMouseMonitor: Any?
     private var commandMenuLocalMouseMonitor: Any?
     private var onboardingWindow: NSWindow?
@@ -168,6 +166,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     @Published var commandMenuVoiceState: SearchViewModel.VoiceState = .idle
     @Published var commandMenuVoiceLevel: CGFloat = 0
     @Published var commandMenuChatRecord: TaskSessionRecord?
+    @Published var commandMenuDismissing = false
+    @Published var commandMenuQuery = ""
+    @Published var commandMenuPinned = false {
+        didSet { commandMenuPanel?.isPinned = commandMenuPinned }
+    }
     private var rememberedCommandMenuChatRecordID: TaskSessionRecord.ID?
     private lazy var ghostCursorStore = GhostCursorStore(playClickSound: { [weak self] in
         self?.soundPlayer.playGhostCursorClick()
@@ -222,12 +225,29 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         let modifierFlags = event.modifierFlags
         let invokeKeyDown = InvokeHotKey.stored().isPressed(in: modifierFlags)
         if commandMenuPanel?.isVisible == true {
-            syncCommandMenuVoice(with: modifierFlags, invokeKeyDown: invokeKeyDown)
-            if !invokeKeyDown {
-                commandKeyHeld = false
-                commandKeyPanel = nil
+            // Don't start voice on the command menu when user is interacting
+            // with a floating panel alongside it.
+            if commandKeyPanel == nil {
+                syncCommandMenuVoice(with: modifierFlags, invokeKeyDown: invokeKeyDown)
             }
-            return
+            // Allow floating panel creation/interaction to proceed below
+            // so the cursor panel works alongside the command menu.
+            if !invokeKeyDown && commandKeyHeld {
+                commandKeyHeld = false
+                lastInvokeKeyReleaseTime = ProcessInfo.processInfo.systemUptime
+                if let panel = commandKeyPanel {
+                    stopHoverLogging(keepRealtimeSessionAlive: panel.searchViewModel.voiceState == .listening || panel.searchViewModel.voiceState == .transcribing)
+                    panel.isCommandKeyHeld = false
+                    panel.updateModifierFlags(modifierFlags)
+                    panel.endInvokeHoldMode()
+                }
+                commandKeyPanel = nil
+                return
+            }
+            if !invokeKeyDown {
+                return
+            }
+            // invokeKeyDown == true: fall through to create/manage floating panel
         }
 
         // Check if an existing panel is in pinned-follow mode
@@ -728,18 +748,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     }
 
     private func showCommandMenu(from source: CommandMenuPresentationSource, navigateToChat: TaskSessionRecord? = nil) {
+        commandMenuDismissing = false
         setCommandMenuChatRecord(resolvedCommandMenuChatRecord(preferred: navigateToChat))
         commandMenuPresentationSource = source
         commandMenuPresentationID = UUID()
 
+        let targetScreen = commandMenuTargetScreen(for: source)
+
         if commandMenuPanel == nil {
             let panel = CommandMenuPanel(
-                contentRect: NSRect(
-                    x: 0,
-                    y: 0,
-                    width: Self.commandMenuPanelWidth,
-                    height: Self.commandMenuCollapsedHeight
-                ),
+                contentRect: targetScreen?.frame ?? .zero,
                 styleMask: [.borderless, .fullSizeContentView],
                 backing: .buffered,
                 defer: false
@@ -749,11 +767,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             panel.level = commandMenuLevel(for: source)
             panel.isOpaque = false
             panel.backgroundColor = .clear
-            panel.hasShadow = true
+            panel.hasShadow = false
             panel.collectionBehavior = commandMenuCollectionBehavior(for: source)
             panel.isReleasedWhenClosed = false
             panel.onEscape = { [weak self] in
                 self?.handleCommandMenuEscape()
+            }
+            panel.onClickOutsideContent = { [weak self] in
+                self?.closeCommandMenu()
             }
             commandMenuPanel = panel
         }
@@ -761,6 +782,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         if source == .invokeHotKey {
             dismissCommandKeyPanelForCommandMenu()
         }
+
+        commandMenuPanel?.isPinned = commandMenuPinned
         commandMenuPanel?.level = commandMenuLevel(for: source)
         commandMenuPanel?.collectionBehavior = commandMenuCollectionBehavior(for: source)
         commandMenuPanel?.setRootView(
@@ -769,80 +792,40 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
                 presentationID: commandMenuPresentationID
             )
         )
-        let initialCommandMenuHeight = commandMenuChatRecord == nil
-            ? Self.commandMenuCollapsedHeight
-            : Self.commandMenuExpandedHeight
-        commandMenuPanel?.setFrame(
-            NSRect(
-                x: commandMenuPanel?.frame.minX ?? 0,
-                y: commandMenuPanel?.frame.minY ?? 0,
-                width: Self.commandMenuPanelWidth,
-                height: initialCommandMenuHeight
-            ),
-            display: false
-        )
-        positionCommandMenu(for: source)
+
+        if let screen = targetScreen {
+            commandMenuPanel?.fillScreen(screen)
+        }
+
+        commandMenuOpenedAt = ProcessInfo.processInfo.systemUptime
         installCommandMenuEventMonitors()
         commandMenuPanel?.makeKeyAndOrderFront(nil)
         statusItem?.button?.highlight(source == .statusItem)
         NSApp.activate(ignoringOtherApps: true)
     }
 
-    func updateCommandMenuSize(_ size: CGSize) {
+    func updateCommandMenuContentFrame(_ frame: CGRect) {
         guard let panel = commandMenuPanel else { return }
-
-        let normalizedSize = CGSize(width: ceil(size.width), height: ceil(size.height))
-        guard normalizedSize.width > 0, normalizedSize.height > 0 else { return }
-        guard abs(panel.frame.width - normalizedSize.width) > 0.5 ||
-              abs(panel.frame.height - normalizedSize.height) > 0.5 else { return }
-
-        let nextOrigin = commandMenuPresentationSource
-            .flatMap { commandMenuOrigin(for: $0, panelSize: normalizedSize) }
-            ?? panel.frame.origin
-        panel.setFrame(NSRect(origin: nextOrigin, size: normalizedSize), display: false)
+        // Convert from SwiftUI global coordinates to window coordinates
+        let windowFrame = panel.frame
+        let contentInWindow = CGRect(
+            x: frame.minX - windowFrame.minX,
+            y: frame.minY - windowFrame.minY,
+            width: frame.width,
+            height: frame.height
+        )
+        panel.updateContentFrame(contentInWindow)
     }
 
-    private func positionCommandMenu(for source: CommandMenuPresentationSource) {
-        guard let panel = commandMenuPanel,
-              let origin = commandMenuOrigin(for: source, panelSize: panel.frame.size) else { return }
-
-        panel.setRestingOrigin(origin, snapBackEnabled: source == .invokeHotKey)
-        panel.setFrameOrigin(origin)
-    }
-
-    private func commandMenuOrigin(
-        for source: CommandMenuPresentationSource,
-        panelSize: CGSize
-    ) -> NSPoint? {
+    private func commandMenuTargetScreen(for source: CommandMenuPresentationSource) -> NSScreen? {
         switch source {
         case .statusItem:
             guard let statusButton = statusItem?.button,
-                  let buttonWindow = statusButton.window else { return nil }
-
+                  let buttonWindow = statusButton.window else { return NSScreen.main }
             let buttonFrame = buttonWindow.frame
-            let targetScreen = NSScreen.screens.first(where: { $0.frame.intersects(buttonFrame) }) ?? NSScreen.main
-            let visibleFrame = targetScreen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? .zero
-
-            var origin = NSPoint(
-                x: buttonFrame.midX - panelSize.width / 2,
-                y: buttonFrame.minY - panelSize.height - 8
-            )
-            origin.x = max(visibleFrame.minX + 8, min(origin.x, visibleFrame.maxX - panelSize.width - 8))
-            origin.y = max(visibleFrame.minY + 8, min(origin.y, visibleFrame.maxY - panelSize.height - 8))
-            return origin
-
+            return NSScreen.screens.first(where: { $0.frame.intersects(buttonFrame) }) ?? NSScreen.main
         case .invokeHotKey:
-            let targetScreen = NSScreen.screens.first(where: { $0.frame.contains(NSEvent.mouseLocation) }) ?? NSScreen.main
-            let visibleFrame = targetScreen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? .zero
-            let bottomInset: CGFloat = 24
-            let horizontalInset: CGFloat = 8
-
-            let unclampedX = visibleFrame.midX - panelSize.width / 2
-            let unclampedY = visibleFrame.minY + bottomInset
-            return NSPoint(
-                x: max(visibleFrame.minX + horizontalInset, min(unclampedX, visibleFrame.maxX - panelSize.width - horizontalInset)),
-                y: max(visibleFrame.minY + horizontalInset, min(unclampedY, visibleFrame.maxY - panelSize.height - horizontalInset))
-            )
+            return NSScreen.screens.first(where: { $0.frame.contains(NSEvent.mouseLocation) }) ?? NSScreen.main
         }
     }
 
@@ -859,15 +842,23 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     private func installCommandMenuEventMonitors() {
         tearDownCommandMenuEventMonitors()
 
+        // Global monitor for clicks in OTHER windows/apps (outside our full-screen panel)
         commandMenuGlobalMouseMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
-            self?.dismissCommandMenuIfNeeded(at: NSEvent.mouseLocation)
-        }
-
-        commandMenuLocalMouseMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
-            guard let self else { return event }
-            let screenPoint = event.window?.convertPoint(toScreen: event.locationInWindow) ?? NSEvent.mouseLocation
-            self.dismissCommandMenuIfNeeded(at: screenPoint)
-            return event
+            guard let self else { return }
+            // Ignore clicks that arrive within a short grace period after opening —
+            // the mouseDown that preceded the status-bar mouseUp (which opened us)
+            // can be delivered to the global monitor immediately.
+            let elapsed = ProcessInfo.processInfo.systemUptime - self.commandMenuOpenedAt
+            guard elapsed > 0.3 else { return }
+            let screenPoint = NSEvent.mouseLocation
+            // Let clicks on the status item toggle normally
+            if let statusButtonRect = self.statusButtonScreenRect(), statusButtonRect.contains(screenPoint) {
+                return
+            }
+            // When unpinned, clicking outside dismisses
+            if !self.commandMenuPinned {
+                self.closeCommandMenu()
+            }
         }
     }
 
@@ -880,20 +871,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             NSEvent.removeMonitor(commandMenuLocalMouseMonitor)
             self.commandMenuLocalMouseMonitor = nil
         }
-    }
-
-    private func dismissCommandMenuIfNeeded(at screenPoint: NSPoint) {
-        guard let panel = commandMenuPanel, panel.isVisible else { return }
-
-        if panel.frame.contains(screenPoint) {
-            return
-        }
-
-        if let statusButtonRect = statusButtonScreenRect(), statusButtonRect.contains(screenPoint) {
-            return
-        }
-
-        closeCommandMenu()
     }
 
     private func statusButtonScreenRect() -> NSRect? {
@@ -1105,6 +1082,36 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             self.ghostCursorStore.unregisterTask(panel.taskId)
             self.removePanel(panel)
         }
+        panel.onInterceptSubmission = { [weak self, weak panel] query in
+            guard let self, let panel, self.commandMenuPanel?.isVisible == true else { return false }
+            let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return false }
+
+            // Build context-enriched message using the inline [hovered ...] format
+            let vm = panel.searchViewModel
+            let hoverPrefix = Self.inlineHoverPrefix(parts: vm.hoveredParts)
+            let contextMessage = hoverPrefix.isEmpty ? trimmed : "\(hoverPrefix) \(trimmed)"
+
+            if let chatRecord = self.commandMenuChatRecord,
+               let chatPanel = chatRecord.panel {
+                // Route to the currently open chat tab with context
+                chatPanel.searchViewModel.query = contextMessage
+                chatPanel.searchViewModel.submitMessage()
+            } else {
+                // No chat open — launch a new task via command menu.
+                // Use startHeadless directly to avoid double-wrapping context.
+                let newPanel = self.makePanel()
+                self.scheduleCommandMenuReveal(for: newPanel)
+                self.closeCommandMenu()
+                self.panels.append(newPanel)
+                newPanel.searchViewModel.query = contextMessage
+                newPanel.startHeadless(
+                    message: contextMessage,
+                    workingDirectoryURL: vm.hoveredWorkingDirectoryURL
+                )
+            }
+            return true
+        }
         panel.onTransitionToCommandMenu = { [weak self, weak panel] _ in
             guard let self, let panel else { return }
             panel.dismiss(restorePreviousFocus: false)
@@ -1146,6 +1153,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     }
 
     func openTaskRecord(_ record: TaskSessionRecord) {
+        record.isUnread = false
         ensureTaskHasLivePanel(record)
         setCommandMenuChatRecord(record)
     }
@@ -1186,15 +1194,23 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         if let commandMenuChatRecord {
             rememberedCommandMenuChatRecordID = commandMenuChatRecord.id
         }
-        commandMenuChatRecord = nil
         commandMenuVoiceController.cancel()
         commandMenuVoiceState = .idle
         commandMenuVoiceLevel = 0
         tearDownCommandMenuEventMonitors()
         statusItem?.button?.highlight(false)
-        commandMenuPanel?.orderOut(nil)
-        commandMenuPanel = nil
-        commandMenuPresentationSource = nil
+
+        // Trigger exit animation, then order out after it completes.
+        // Keep commandMenuChatRecord alive during the animation so the
+        // content freezes in place (no height collapse / placeholder swap).
+        commandMenuDismissing = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+            self?.commandMenuChatRecord = nil
+            self?.commandMenuPanel?.orderOut(nil)
+            self?.commandMenuPanel = nil
+            self?.commandMenuPresentationSource = nil
+            self?.commandMenuDismissing = false
+        }
     }
 
     func handleCommandMenuBackNavigation() {
@@ -1238,14 +1254,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         record.panel = panel
         let key = ObjectIdentifier(panel)
         taskRecordLookup[key] = record
-        record.sync(from: panel)
     }
 
     private func registerTaskRecord(for panel: FloatingPanel) {
         let key = ObjectIdentifier(panel)
         if let existing = taskRecordLookup[key] {
             existing.sync(from: panel)
-            sortTaskRecords()
+            objectWillChange.send()
             return
         }
 
@@ -1253,7 +1268,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         record.persistedSessionId = panel.persistedSessionId
         taskRecordLookup[key] = record
         taskRecords.append(record)
-        sortTaskRecords()
     }
 
     private func syncTaskRecord(for panel: FloatingPanel) {
@@ -1262,12 +1276,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         let key = ObjectIdentifier(panel)
         if let record = taskRecordLookup[key] {
             record.sync(from: panel)
+            objectWillChange.send()
         } else {
             registerTaskRecord(for: panel)
-            return
         }
-
-        sortTaskRecords()
     }
 
     private func removePanel(_ panel: FloatingPanel) {
@@ -1295,16 +1307,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             let record = TaskSessionRecord(persisted: session)
             taskRecords.append(record)
         }
-        sortTaskRecords()
-    }
-
-    private func sortTaskRecords() {
-        taskRecords = taskRecords.sorted { lhs, rhs in
-            if lhs.lastActivityAt == rhs.lastActivityAt {
-                return lhs.startedAt > rhs.startedAt
-            }
-            return lhs.lastActivityAt > rhs.lastActivityAt
-        }
+        // Sort once on load: oldest first (leftmost), newest last (rightmost).
+        taskRecords.sort { $0.startedAt < $1.startedAt }
     }
 
     private func scheduleCommandMenuReveal(for panel: FloatingPanel) {
@@ -1457,6 +1461,17 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         }
 
         stopCommandMenuVoiceIfNeeded()
+    }
+
+    func toggleCommandMenuVoice() {
+        switch commandMenuVoiceState {
+        case .idle, .failed:
+            startCommandMenuVoiceIfNeeded()
+        case .listening:
+            stopCommandMenuVoiceIfNeeded()
+        case .transcribing:
+            break
+        }
     }
 
     private func startCommandMenuVoiceIfNeeded() {
@@ -1677,6 +1692,28 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         dot.layer?.cornerRadius = dotSize / 2
         button.addSubview(dot)
         updateDot = dot
+    }
+
+    /// Builds a `[hovered X in App]` prefix from hover parts, matching
+    /// the format used by `HoverSnapshot.inlineLogText`.
+    static func inlineHoverPrefix(parts: [String]) -> String {
+        guard !parts.isEmpty else { return "" }
+        let appName = parts.first?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let targetPart = parts.last?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+
+        let targetText: String
+        if let separatorRange = targetPart.range(of: ": ") {
+            targetText = String(targetPart[separatorRange.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+        } else if !targetPart.isEmpty {
+            targetText = targetPart
+        } else {
+            targetText = "item"
+        }
+
+        if !appName.isEmpty && targetText != appName {
+            return "[hovered \(targetText) in \(appName)]"
+        }
+        return "[hovered \(targetText)]"
     }
 }
 

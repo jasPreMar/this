@@ -3,16 +3,12 @@ import MarkdownUI
 import SwiftUI
 
 final class CommandMenuPanel: NSPanel {
-    private static let nativeGlassCornerRadius: CGFloat = 20
-
     var onEscape: (() -> Void)?
-    private var dragStartMonitor: Any?
-    private var pendingDragEvent: NSEvent?
-    private var restingOrigin: NSPoint?
-    private var snapBackThreshold: CGFloat = 0
-    private var shouldSnapBackToRestingOrigin = false
+    var onClickOutsideContent: (() -> Void)?
+    var isPinned = false
+
     private var hostingView: NSHostingView<AnyView>?
-    private var glassEffectView: NSView?
+    private var passthrough: CommandMenuPassthroughView?
 
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
@@ -29,12 +25,7 @@ final class CommandMenuPanel: NSPanel {
         installSurfaceIfNeeded()
     }
 
-    override func sendEvent(_ event: NSEvent) {
-        super.sendEvent(event)
-    }
-
     override func orderOut(_ sender: Any?) {
-        cancelPendingDrag()
         super.orderOut(sender)
     }
 
@@ -42,22 +33,13 @@ final class CommandMenuPanel: NSPanel {
         onEscape?()
     }
 
-    func setRestingOrigin(
-        _ origin: NSPoint,
-        snapBackEnabled: Bool,
-        snapBackThreshold: CGFloat = 84
-    ) {
-        restingOrigin = origin
-        shouldSnapBackToRestingOrigin = snapBackEnabled
-        self.snapBackThreshold = snapBackThreshold
+    func fillScreen(_ screen: NSScreen) {
+        setFrame(screen.frame, display: true)
     }
 
-    private func cancelPendingDrag() {
-        if let dragStartMonitor {
-            NSEvent.removeMonitor(dragStartMonitor)
-            self.dragStartMonitor = nil
-        }
-        pendingDragEvent = nil
+    /// Called by SwiftUI when the visible content frame changes (in window coordinates).
+    func updateContentFrame(_ rect: CGRect) {
+        passthrough?.contentFrame = rect
     }
 
     private func installSurfaceIfNeeded() {
@@ -65,98 +47,132 @@ final class CommandMenuPanel: NSPanel {
 
         isOpaque = false
         backgroundColor = .clear
-        contentView = hostingView
-        hasShadow = true
-    }
+        hasShadow = false
 
-    private func snapBackIfNeeded() {
-        guard shouldSnapBackToRestingOrigin,
-              let restingOrigin else { return }
-
-        let dragDistance = hypot(frame.minX - restingOrigin.x, frame.minY - restingOrigin.y)
-        guard dragDistance <= snapBackThreshold else { return }
-
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.14
-            animator().setFrameOrigin(restingOrigin)
+        if passthrough == nil {
+            let container = CommandMenuPassthroughView(frame: .zero)
+            container.panel = self
+            container.autoresizingMask = [.width, .height]
+            passthrough = container
         }
+
+        if hostingView.superview !== passthrough {
+            passthrough?.addSubview(hostingView)
+            hostingView.frame = passthrough?.bounds ?? .zero
+        }
+
+        contentView = passthrough
+    }
+}
+
+/// Custom NSView that passes mouse clicks through to apps behind when
+/// they land outside the visible command-menu content area.
+private final class CommandMenuPassthroughView: NSView {
+    weak var panel: CommandMenuPanel?
+    var contentFrame: CGRect = .zero
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        // If the click is inside the content frame, do normal hit-testing
+        if contentFrame.contains(point) {
+            return super.hitTest(point)
+        }
+        // Don't dismiss if the content frame hasn't been reported yet — the
+        // GeometryReader fires asynchronously, so the very first hit test
+        // after the panel appears would otherwise see .zero and dismiss
+        // immediately.
+        guard contentFrame != .zero else {
+            return super.hitTest(point)
+        }
+        // Otherwise, dismiss if unpinned and pass through
+        if let panel, !panel.isPinned {
+            panel.onClickOutsideContent?()
+        }
+        return nil
     }
 
+    // Make the transparent areas invisible to accessibility queries so that
+    // floating panels can detect what's behind the command menu window.
+    override func isAccessibilityElement() -> Bool { false }
+
+    override func accessibilityHitTest(_ point: NSPoint) -> Any? {
+        // Only return accessibility elements for the visible content area.
+        // Convert screen point to local coordinates.
+        guard let window else { return nil }
+        let windowPoint = window.convertPoint(fromScreen: point)
+        let localPoint = convert(windowPoint, from: nil)
+        if contentFrame != .zero && !contentFrame.contains(localPoint) {
+            return nil
+        }
+        return super.accessibilityHitTest(point)
+    }
 }
 
 struct CommandMenuView: View {
     private static let panelWidth: CGFloat = 720
-    private static let maxPanelHeight: CGFloat = 520
+    private static let maxChatHeight: CGFloat = 500
     private static let fallbackInputRowHeight: CGFloat = 54
     private static let fallbackBottomBarHeight: CGFloat = 48
+    private static let fallbackTabBarHeight: CGFloat = 44
     private static let dividerHeight: CGFloat = 1
-    private static let taskListVerticalPadding: CGFloat = 8
-
+    private static let bottomMargin: CGFloat = 80
 
     @ObservedObject var appDelegate: AppDelegate
     let presentationID: UUID
-    @State private var query = ""
-    @State private var selectedTaskID: TaskSessionRecord.ID?
-    @State private var hoveredTaskID: TaskSessionRecord.ID?
-    @State private var hoverSelectionEnabled = false
-    @State private var boundaryExitDirection: Int?
+    @State private var isContentVisible = false
     @State private var textWidth: CGFloat = FocusedTextField.minWidth
     @State private var textHeight: CGFloat = 20
     @State private var inputRowHeight: CGFloat = Self.fallbackInputRowHeight
     @State private var bottomBarHeight: CGFloat = Self.fallbackBottomBarHeight
+    @State private var tabBarHeight: CGFloat = Self.fallbackTabBarHeight
+    @State private var chatContentHeight: CGFloat = 0
 
     private var usesNativeGlassSurface: Bool {
         false
     }
 
-    private var sortedTasks: [TaskSessionRecord] {
-        appDelegate.taskRecords.sorted { lhs, rhs in
-            if lhs.lastActivityAt == rhs.lastActivityAt {
-                return lhs.startedAt > rhs.startedAt
-            }
-            return lhs.lastActivityAt > rhs.lastActivityAt
-        }
+    private var tabs: [TaskSessionRecord] {
+        appDelegate.taskRecords
     }
 
-    private var displayedTasks: [TaskSessionRecord] {
-        sortedTasks.reversed()
-    }
-
-    private var selectedTask: TaskSessionRecord? {
-        guard let selectedTaskID else { return nil }
-        return sortedTasks.first(where: { $0.id == selectedTaskID })
+    private var query: String {
+        get { appDelegate.commandMenuQuery }
+        nonmutating set { appDelegate.commandMenuQuery = newValue }
     }
 
     private var trimmedQuery: String {
-        query.trimmingCharacters(in: .whitespacesAndNewlines)
+        appDelegate.commandMenuQuery.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private var queryIsEmpty: Bool {
         trimmedQuery.isEmpty
     }
 
+    private var isExpanded: Bool {
+        appDelegate.commandMenuChatRecord != nil
+    }
+
+    private var activeChatRecord: TaskSessionRecord? {
+        appDelegate.commandMenuChatRecord
+    }
+
     private var footerShortcuts: [CommandMenuShortcutItem] {
-        var shortcuts: [CommandMenuShortcutItem]
+        var shortcuts: [CommandMenuShortcutItem] = []
 
-        if queryIsEmpty {
-            shortcuts = []
-
-            if let selectedTask {
-                shortcuts.append(CommandMenuShortcutItem(label: "Open", keys: ["↩"]))
-
-                if selectedTask.isRunning {
-                    shortcuts.append(CommandMenuShortcutItem(label: "Stop", keys: ["⌫"]))
-                }
-
-                shortcuts.append(CommandMenuShortcutItem(label: "Delete", keys: ["⌘", "⌫"]))
+        if isExpanded {
+            if !queryIsEmpty {
+                shortcuts.append(CommandMenuShortcutItem(label: "Send", keys: ["↩"]))
+            }
+            if activeChatRecord?.isRunning == true {
+                shortcuts.append(CommandMenuShortcutItem(label: "Stop", keys: ["⌫"]))
             }
         } else {
-            shortcuts = [
-                CommandMenuShortcutItem(label: "Run", keys: ["↩"]),
-                CommandMenuShortcutItem(label: "Send Feedback", keys: ["⌘", "⇧", "↩"])
-            ]
+            if !queryIsEmpty {
+                shortcuts.append(CommandMenuShortcutItem(label: "Run", keys: ["↩"]))
+                shortcuts.append(CommandMenuShortcutItem(label: "Send Feedback", keys: ["⌘", "⇧", "↩"]))
+            }
         }
 
+        let hasRunningTasks = tabs.contains(where: \.isRunning)
         if hasRunningTasks {
             shortcuts.append(CommandMenuShortcutItem(label: "Kill All", keys: ["⌘", "⇧", "⌫"]))
         }
@@ -165,151 +181,157 @@ struct CommandMenuView: View {
     }
 
     private var hasTasks: Bool {
-        !sortedTasks.isEmpty
-    }
-
-    private var hasRunningTasks: Bool {
-        sortedTasks.contains(where: \.isRunning)
-    }
-
-    private var hasVisibleList: Bool {
-        hasTasks
-    }
-
-    private var dividerCount: CGFloat {
-        hasVisibleList ? 2 : 1
-    }
-
-    private var chromeHeight: CGFloat {
-        inputRowHeight + bottomBarHeight + (dividerCount * Self.dividerHeight)
-    }
-
-    private var maxTaskSectionHeight: CGFloat {
-        max(Self.maxPanelHeight - chromeHeight, 0)
-    }
-
-    private var targetTaskSectionHeight: CGFloat {
-        maxTaskSectionHeight / 2
-    }
-
-    private var listSectionHeight: CGFloat {
-        hasVisibleList ? targetTaskSectionHeight : 0
-    }
-
-    private var desiredPanelHeight: CGFloat {
-        if appDelegate.commandMenuChatRecord != nil {
-            Self.maxPanelHeight
-        } else {
-            chromeHeight + listSectionHeight
-        }
+        !tabs.isEmpty
     }
 
     var body: some View {
-        ZStack(alignment: .bottom) {
-            Group {
-                if let chatRecord = appDelegate.commandMenuChatRecord,
-                   let viewModel = chatRecord.panel?.searchViewModel {
-                    CommandMenuChatDetailView(
-                        task: chatRecord,
-                        viewModel: viewModel,
-                        onBack: { appDelegate.handleCommandMenuBackNavigation() }
-                    )
-                } else {
-                    taskListContent
+        VStack(spacing: 0) {
+            Spacer(minLength: 0)
+
+            VStack(spacing: 0) {
+                headerRow
+
+                Divider()
+
+                if isExpanded {
+                    chatSection
+
+                    Divider()
                 }
+
+                inputRow
+
+                Divider()
+
+                bottomBar
             }
+            .frame(width: Self.panelWidth)
+            .modifier(CommandMenuSurfaceChrome(usesNativeGlassSurface: usesNativeGlassSurface))
+            .shadow(color: .black.opacity(0.2), radius: 20, x: 0, y: 5)
+            .opacity(isContentVisible ? 1 : 0)
+            .blur(radius: isContentVisible ? 0 : 10)
+            .offset(y: isContentVisible ? 0 : 8)
+            .background(
+                GeometryReader { geometry in
+                    Color.clear.preference(
+                        key: CommandMenuContentFramePreferenceKey.self,
+                        value: geometry.frame(in: .global)
+                    )
+                }
+            )
+            .padding(.bottom, Self.bottomMargin)
+            .animation(.easeInOut(duration: 0.25), value: isExpanded)
         }
         .id(presentationID)
-        .frame(width: Self.panelWidth)
-        .frame(maxHeight: .infinity, alignment: .bottom)
-        .modifier(CommandMenuSurfaceChrome(usesNativeGlassSurface: usesNativeGlassSurface))
-        .onAppear {
-            syncPanelSize()
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .onPreferenceChange(CommandMenuContentFramePreferenceKey.self) { frame in
+            appDelegate.updateCommandMenuContentFrame(frame)
         }
-        .onChange(of: desiredPanelHeight) { _, _ in
-            syncPanelSize()
+        .onAppear {
+            withAnimation(.easeOut(duration: 0.25)) {
+                isContentVisible = true
+            }
+        }
+        .onChange(of: appDelegate.commandMenuDismissing) { _, dismissing in
+            guard dismissing else { return }
+            withAnimation(.easeIn(duration: 0.2)) {
+                isContentVisible = false
+            }
         }
     }
 
-    private var taskListContent: some View {
-        VStack(spacing: 0) {
-            bottomBar
-
-            Divider()
-
-            if hasVisibleList {
+    private var headerRow: some View {
+        HStack(spacing: 0) {
+            if hasTasks {
                 ScrollViewReader { proxy in
-                    ScrollView {
-                        VStack(spacing: 0) {
-                            ForEach(displayedTasks) { task in
-                                CommandMenuTaskRow(
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 6) {
+                            ForEach(tabs) { task in
+                                CommandMenuTabButton(
                                     task: task,
-                                    isSelected: task.id == selectedTaskID,
-                                    isHovered: task.id == hoveredTaskID,
-                                    onHover: { if hoverSelectionEnabled { hoveredTaskID = task.id } },
-                                    onHoverEnd: { if hoveredTaskID == task.id { hoveredTaskID = nil } },
-                                    onOpen: { open(task) }
+                                    isSelected: activeChatRecord?.id == task.id,
+                                    onTap: { toggleTab(task) }
                                 )
                                 .id(task.id)
                             }
                         }
-                        .padding(.vertical, Self.taskListVerticalPadding)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
                     }
-                    .onAppear {
-                        guard let bottomTaskID = displayedTasks.last?.id else { return }
-                        DispatchQueue.main.async {
-                            proxy.scrollTo(bottomTaskID, anchor: .bottom)
-                        }
-                    }
-                    .onChange(of: selectedTaskID) { _, newID in
+                    .onChange(of: activeChatRecord?.id) { _, newID in
                         guard let newID else { return }
-                        withAnimation(.easeOut(duration: 0.12)) {
+                        withAnimation(.easeInOut(duration: 0.2)) {
                             proxy.scrollTo(newID, anchor: .center)
                         }
                     }
-                    .onChange(of: displayedTasks.map(\.id)) { _, _ in
-                        guard selectedTaskID == nil,
-                              let bottomTaskID = displayedTasks.last?.id else { return }
-                        DispatchQueue.main.async {
-                            proxy.scrollTo(bottomTaskID, anchor: .bottom)
-                        }
-                    }
                 }
-                .frame(height: listSectionHeight, alignment: .top)
-
-                Divider()
+            } else {
+                Spacer(minLength: 0)
             }
 
-            inputRow
-        }
-        .onAppear {
-            hoverSelectionEnabled = false
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                hoverSelectionEnabled = true
+            HStack(spacing: 4) {
+                if isExpanded {
+                    Button(action: {
+                        appDelegate.handleCommandMenuBackNavigation()
+                        query = ""
+                    }) {
+                        Image(systemName: "plus")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 6)
+                            .background(
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    .fill(Color.clear)
+                            )
+                            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                SettingsMenuButton(
+                    onCheckForUpdates: { appDelegate.checkForUpdatesFromCommandMenu() },
+                    onLeaveFeedback: { openFeedback() },
+                    onSettings: { openSettings() },
+                    onQuit: { appDelegate.quitFromCommandMenu() }
+                )
+
+                CommandMenuPinButton(isPinned: $appDelegate.commandMenuPinned)
             }
+            .padding(.trailing, 12)
         }
-        .onChange(of: sortedTasks.map(\.id)) { _, _ in
-            guard queryIsEmpty else { return }
-            if let selectedTaskID,
-               !sortedTasks.contains(where: { $0.id == selectedTaskID }) {
-                self.selectedTaskID = nil
-            }
+        .reportHeight(CommandMenuTabBarHeightPreferenceKey.self)
+        .onPreferenceChange(CommandMenuTabBarHeightPreferenceKey.self) { height in
+            guard height > 0 else { return }
+            tabBarHeight = height
         }
-        .onChange(of: queryIsEmpty) { _, _ in
-            selectedTaskID = nil
-            boundaryExitDirection = nil
+    }
+
+    @ViewBuilder
+    private var chatSection: some View {
+        if let chatRecord = activeChatRecord,
+           let viewModel = chatRecord.panel?.searchViewModel {
+            CommandMenuChatSection(
+                viewModel: viewModel,
+                contentHeight: $chatContentHeight
+            )
+            .frame(maxHeight: Self.maxChatHeight)
+            .clipped()
         }
     }
 
     private var inputRow: some View {
         CommandMenuTextInputRow(
-            text: $query,
+            text: $appDelegate.commandMenuQuery,
             textWidth: $textWidth,
             textHeight: $textHeight,
-            placeholder: "Start a new task from your Home folder...",
+            placeholder: isExpanded ? "Message this task..." : "Ask Claude Code anything…",
             voiceState: appDelegate.commandMenuVoiceState,
             voiceLevel: appDelegate.commandMenuVoiceLevel,
+            isStreaming: activeChatRecord?.isRunning == true,
             onSubmit: submitInput,
+            onStop: stopActiveTask,
+            onVoice: { self.appDelegate.toggleCommandMenuVoice() },
             onKeyDown: handleInputKeyDown
         )
         .reportHeight(CommandMenuInputRowHeightPreferenceKey.self)
@@ -321,13 +343,6 @@ struct CommandMenuView: View {
 
     private var bottomBar: some View {
         HStack(spacing: 14) {
-            SettingsMenuButton(
-                onCheckForUpdates: { appDelegate.checkForUpdatesFromCommandMenu() },
-                onLeaveFeedback: { openFeedback() },
-                onSettings: { openSettings() },
-                onQuit: { appDelegate.quitFromCommandMenu() }
-            )
-
             Spacer(minLength: 16)
 
             ForEach(footerShortcuts) { shortcut in
@@ -335,7 +350,7 @@ struct CommandMenuView: View {
             }
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 10)
+        .frame(height: Self.fallbackBottomBarHeight)
         .background(Color.black.opacity(0.035))
         .reportHeight(CommandMenuBottomBarHeightPreferenceKey.self)
         .onPreferenceChange(CommandMenuBottomBarHeightPreferenceKey.self) { height in
@@ -344,24 +359,71 @@ struct CommandMenuView: View {
         }
     }
 
+    private func switchToPreviousTab() {
+        guard !tabs.isEmpty else { return }
+        guard let currentID = activeChatRecord?.id,
+              let currentIndex = tabs.firstIndex(where: { $0.id == currentID }) else {
+            if let last = tabs.last {
+                appDelegate.openTaskRecord(last)
+            }
+            return
+        }
+        let previousIndex = currentIndex > 0 ? currentIndex - 1 : tabs.count - 1
+        appDelegate.openTaskRecord(tabs[previousIndex])
+    }
+
+    private func switchToNextTab() {
+        guard !tabs.isEmpty else { return }
+        guard let currentID = activeChatRecord?.id,
+              let currentIndex = tabs.firstIndex(where: { $0.id == currentID }) else {
+            if let first = tabs.first {
+                appDelegate.openTaskRecord(first)
+            }
+            return
+        }
+        let nextIndex = currentIndex < tabs.count - 1 ? currentIndex + 1 : 0
+        appDelegate.openTaskRecord(tabs[nextIndex])
+    }
+
+    private func toggleTab(_ task: TaskSessionRecord) {
+        if activeChatRecord?.id == task.id {
+            appDelegate.handleCommandMenuBackNavigation()
+        } else {
+            appDelegate.openTaskRecord(task)
+        }
+    }
+
+    private func selectTabByNumber(_ number: Int) {
+        guard !tabs.isEmpty else { return }
+        let index: Int
+        if number == 9 {
+            // Cmd+9 always selects the last tab
+            index = tabs.count - 1
+        } else {
+            index = number - 1
+        }
+        guard index < tabs.count else { return }
+        appDelegate.openTaskRecord(tabs[index])
+    }
+
+    private func stopActiveTask() {
+        if let record = activeChatRecord, record.isRunning {
+            appDelegate.stopTaskRecord(record)
+        }
+    }
+
     private func submitInput() {
-        if queryIsEmpty {
-            openSelectedTask()
+        guard !queryIsEmpty else { return }
+        if isExpanded, let chatVM = activeChatRecord?.panel?.searchViewModel {
+            // Copy the input text to the chat's view model and submit
+            chatVM.query = trimmedQuery
+            query = ""
+            chatVM.submitMessage()
         } else {
             if appDelegate.launchTaskFromCommandMenu(query: trimmedQuery) != nil {
                 query = ""
             }
         }
-    }
-
-    private func syncPanelSize() {
-        guard desiredPanelHeight > 0 else { return }
-        appDelegate.updateCommandMenuSize(
-            CGSize(
-                width: Self.panelWidth,
-                height: ceil(desiredPanelHeight)
-            )
-        )
     }
 
     private func handleInputKeyDown(_ event: NSEvent) -> Bool {
@@ -370,35 +432,27 @@ struct CommandMenuView: View {
         let hasShift = modifiers.contains(.shift)
 
         switch event.keyCode {
-        case 125:
-            moveTaskSelection(by: 1)
-            return true
-        case 126:
-            moveTaskSelection(by: -1)
-            return true
-        case 36, 76:
-            if hasCommand && hasShift && !queryIsEmpty {
+        case 36, 76: // Return, Enter
+            if hasCommand && hasShift && !queryIsEmpty && !isExpanded {
                 sendQueryAsFeedback()
                 return true
             }
 
             submitInput()
             return true
-        case 51:
+        case 51: // Delete
             if hasCommand && hasShift {
+                let hasRunningTasks = tabs.contains(where: \.isRunning)
                 guard hasRunningTasks else { return false }
                 killAllRunningTasks()
                 return true
             }
 
-            if hasCommand, queryIsEmpty {
-                deleteSelectedTask()
-                return true
-            }
-
-            if modifiers.isEmpty, queryIsEmpty {
-                stopSelectedTask()
-                return true
+            if modifiers.isEmpty, queryIsEmpty, isExpanded {
+                if let record = activeChatRecord, record.isRunning {
+                    appDelegate.stopTaskRecord(record)
+                    return true
+                }
             }
         case 12: // Q
             if hasCommand {
@@ -425,59 +479,32 @@ struct CommandMenuView: View {
                 openSettings()
                 return true
             }
+        case 33: // [
+            if hasCommand && hasShift {
+                switchToPreviousTab()
+                return true
+            }
+        case 30: // ]
+            if hasCommand && hasShift {
+                switchToNextTab()
+                return true
+            }
+        case 18, 19, 20, 21, 23, 22, 26, 28, 25: // 1-9
+            if hasCommand && !hasShift {
+                let digitMap: [UInt16: Int] = [
+                    18: 1, 19: 2, 20: 3, 21: 4, 23: 5,
+                    22: 6, 26: 7, 28: 8, 25: 9
+                ]
+                if let digit = digitMap[event.keyCode] {
+                    selectTabByNumber(digit)
+                    return true
+                }
+            }
         default:
             break
         }
 
         return false
-    }
-
-    private func selectFirstTaskIfNeeded() {
-        selectedTaskID = displayedTasks.last?.id
-        boundaryExitDirection = nil
-    }
-
-    private func moveTaskSelection(by delta: Int) {
-        guard !displayedTasks.isEmpty else { return }
-        guard let currentSelectionID = selectedTaskID,
-              let currentIndex = displayedTasks.firstIndex(where: { $0.id == currentSelectionID }) else {
-            if boundaryExitDirection == delta {
-                return
-            }
-            selectedTaskID = delta < 0 ? displayedTasks.last?.id : displayedTasks.first?.id
-            boundaryExitDirection = nil
-            return
-        }
-
-        if (delta < 0 && currentIndex == 0) ||
-            (delta > 0 && currentIndex == displayedTasks.count - 1) {
-            selectedTaskID = nil
-            boundaryExitDirection = delta
-            return
-        }
-
-        let nextIndex = min(max(currentIndex + delta, 0), displayedTasks.count - 1)
-        selectedTaskID = displayedTasks[nextIndex].id
-        boundaryExitDirection = nil
-    }
-
-    private func openSelectedTask() {
-        guard let selectedTask else { return }
-        open(selectedTask)
-    }
-
-    private func open(_ task: TaskSessionRecord) {
-        appDelegate.openTaskRecord(task)
-    }
-
-    private func stopSelectedTask() {
-        guard let selectedTask else { return }
-        appDelegate.stopTaskRecord(selectedTask)
-    }
-
-    private func deleteSelectedTask() {
-        guard let selectedTask else { return }
-        appDelegate.deleteTaskRecord(selectedTask)
     }
 
     private func openSettings() {
@@ -520,190 +547,75 @@ private struct CommandMenuSurfaceChrome: ViewModifier {
     }
 }
 
-private struct CommandMenuTaskRow: View {
-    @ObservedObject var task: TaskSessionRecord
-    let isSelected: Bool
-    let isHovered: Bool
-    let onHover: () -> Void
-    let onHoverEnd: () -> Void
-    let onOpen: () -> Void
 
-    private var backgroundOpacity: Double {
-        if isSelected { return 0.08 }
-        if isHovered { return 0.04 }
-        return 0
-    }
-
-    var body: some View {
-        Button(action: onOpen) {
-            HStack(spacing: 12) {
-                taskIcon
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(task.title)
-                        .font(.system(size: 15, weight: .medium))
-                        .foregroundStyle(.primary)
-                        .lineLimit(1)
-
-                    if !task.subtitle.isEmpty {
-                        Text(task.subtitle)
-                            .font(.system(size: 12))
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
-                }
-
-                Spacer(minLength: 16)
-
-                if let startedAt = task.currentStreamStartedAt {
-                    ActiveStreamBadgeView(startedAt: startedAt)
-                }
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 11)
-            .background(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(Color.black.opacity(backgroundOpacity))
-            )
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .padding(.horizontal, 8)
-        .onHover { isHovering in
-            if isHovering {
-                onHover()
-            } else {
-                onHoverEnd()
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var taskIcon: some View {
-        if let icon = task.icon {
-            Image(nsImage: icon)
-                .resizable()
-                .interpolation(.high)
-                .scaledToFit()
-                .frame(width: 24, height: 24)
-                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-        } else {
-            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .fill(Color.black.opacity(0.06))
-                .frame(width: 24, height: 24)
-                .overlay {
-                    Image(systemName: "app")
-                        .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
-                }
-        }
-    }
-}
-
-private struct CommandMenuChatDetailView: View {
-    @ObservedObject var task: TaskSessionRecord
+private struct CommandMenuChatSection: View {
     @ObservedObject var viewModel: SearchViewModel
-    let onBack: () -> Void
-
-    @State private var chatTextWidth: CGFloat = FocusedTextField.minWidth
-    @State private var chatTextHeight: CGFloat = 18
+    @Binding var contentHeight: CGFloat
 
     var body: some View {
-        VStack(spacing: 0) {
-            chatHeader
-
-            Divider()
-
-            ScrollViewReader { proxy in
-                ScrollView {
-                    HStack(alignment: .top, spacing: 0) {
-                        chatTranscript
-                        Spacer(minLength: 0)
-                    }
+        ScrollViewReader { proxy in
+            ScrollView {
+                HStack(alignment: .top, spacing: 0) {
+                    chatTranscript
+                    Spacer(minLength: 0)
                 }
-                .onAppear {
+                .background(
+                    GeometryReader { geometry in
+                        Color.clear.preference(
+                            key: CommandMenuChatContentHeightPreferenceKey.self,
+                            value: geometry.size.height
+                        )
+                    }
+                )
+            }
+            .onAppear {
+                proxy.scrollTo("chatBottom", anchor: .bottom)
+            }
+            .onChange(of: viewModel.claudeManager?.outputText) { _, _ in
+                withAnimation(.easeOut(duration: 0.1)) {
                     proxy.scrollTo("chatBottom", anchor: .bottom)
                 }
-                .onChange(of: viewModel.claudeManager?.outputText) { _, _ in
-                    withAnimation(.easeOut(duration: 0.1)) {
-                        proxy.scrollTo("chatBottom", anchor: .bottom)
-                    }
-                }
-                .onChange(of: viewModel.chatHistory.count) { _, _ in
-                    withAnimation(.easeOut(duration: 0.1)) {
-                        proxy.scrollTo("chatBottom", anchor: .bottom)
-                    }
-                }
-                .onChange(of: viewModel.claudeManager?.events.count) { _, _ in
-                    withAnimation(.easeOut(duration: 0.1)) {
-                        proxy.scrollTo("chatBottom", anchor: .bottom)
-                    }
-                }
-                .onChange(of: viewModel.claudeManager?.status) { _, _ in
-                    withAnimation(.easeOut(duration: 0.1)) {
-                        proxy.scrollTo("chatBottom", anchor: .bottom)
-                    }
-                }
-                .onChange(of: viewModel.claudeManager?.activeToolName) { _, _ in
-                    withAnimation(.easeOut(duration: 0.1)) {
-                        proxy.scrollTo("chatBottom", anchor: .bottom)
-                    }
+            }
+            .onChange(of: viewModel.chatHistory.count) { _, _ in
+                withAnimation(.easeOut(duration: 0.1)) {
+                    proxy.scrollTo("chatBottom", anchor: .bottom)
                 }
             }
-
-            Divider()
-
-            CommandMenuTextInputRow(
-                text: $viewModel.query,
-                textWidth: $chatTextWidth,
-                textHeight: $chatTextHeight,
-                placeholder: "Message this task...",
-                voiceState: viewModel.voiceState,
-                voiceLevel: viewModel.voiceLevel,
-                onSubmit: {
-                    viewModel.submitMessage()
+            .onChange(of: viewModel.claudeManager?.events.count) { _, _ in
+                withAnimation(.easeOut(duration: 0.1)) {
+                    proxy.scrollTo("chatBottom", anchor: .bottom)
                 }
-            )
+            }
+            .onChange(of: viewModel.claudeManager?.status) { _, _ in
+                withAnimation(.easeOut(duration: 0.1)) {
+                    proxy.scrollTo("chatBottom", anchor: .bottom)
+                }
+            }
+            .onChange(of: viewModel.claudeManager?.activeToolName) { _, _ in
+                withAnimation(.easeOut(duration: 0.1)) {
+                    proxy.scrollTo("chatBottom", anchor: .bottom)
+                }
+            }
         }
-        .frame(height: 520)
-    }
-
-    private var chatHeader: some View {
-        HStack(spacing: 12) {
-            Button(action: onBack) {
-                Image(systemName: "chevron.left")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(.secondary)
-            }
-            .buttonStyle(.plain)
-
-            if let icon = task.icon {
-                Image(nsImage: icon)
-                    .resizable()
-                    .interpolation(.high)
-                    .scaledToFit()
-                    .frame(width: 20, height: 20)
-                    .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
-            }
-
-            Text(task.title)
-                .font(.system(size: 15, weight: .medium))
-                .foregroundStyle(.primary)
-                .lineLimit(1)
-
-            Spacer(minLength: 16)
+        .onPreferenceChange(CommandMenuChatContentHeightPreferenceKey.self) { height in
+            contentHeight = height
         }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 12)
     }
 
     private var chatTranscript: some View {
         VStack(alignment: .leading, spacing: 8) {
             ForEach(viewModel.chatHistory) { entry in
                 if entry.role == "user" {
-                    Text("> \(entry.text)")
-                        .font(.system(size: 12, design: .monospaced))
-                        .foregroundColor(.secondary)
+                    HStack {
+                        Spacer(minLength: 40)
+                        Text(entry.text)
+                            .font(.system(size: 13))
+                            .foregroundColor(.primary)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(Color.secondary.opacity(0.15))
+                            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    }
                 } else {
                     EventsSummaryView(events: entry.events, isDone: true)
                     AssistantContentView(text: entry.text, structuredUI: entry.structuredUI)
@@ -721,6 +633,77 @@ private struct CommandMenuChatDetailView: View {
     }
 }
 
+private struct CommandMenuTabButton: View {
+    @ObservedObject var task: TaskSessionRecord
+    let isSelected: Bool
+    let onTap: () -> Void
+
+    @State private var isHovering = false
+
+    private var backgroundOpacity: Double {
+        if isSelected { return 0.12 }
+        if isHovering { return 0.06 }
+        return 0
+    }
+
+    var body: some View {
+        Button(action: onTap) {
+            HStack(spacing: 6) {
+                if let icon = task.icon {
+                    Image(nsImage: icon)
+                        .resizable()
+                        .interpolation(.high)
+                        .scaledToFit()
+                        .frame(width: 16, height: 16)
+                        .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+                }
+
+                Text(task.title)
+                    .font(.system(size: 12, weight: isSelected ? .semibold : .medium))
+                    .foregroundStyle(isSelected ? .primary : .secondary)
+                    .lineLimit(1)
+
+                if task.isRunning {
+                    Circle()
+                        .fill(Color.green)
+                        .frame(width: 6, height: 6)
+                } else if task.isUnread {
+                    Circle()
+                        .fill(Color.secondary)
+                        .frame(width: 6, height: 6)
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Color.black.opacity(backgroundOpacity))
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering in
+            isHovering = hovering
+        }
+    }
+}
+
+private struct CommandMenuChatContentHeightPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
+private struct CommandMenuTabBarHeightPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
 private struct CommandMenuTextInputRow: View {
     @Binding var text: String
     @Binding var textWidth: CGFloat
@@ -728,22 +711,24 @@ private struct CommandMenuTextInputRow: View {
     let placeholder: String
     let voiceState: SearchViewModel.VoiceState
     let voiceLevel: CGFloat
+    let isStreaming: Bool
     let onSubmit: () -> Void
+    let onStop: () -> Void
+    let onVoice: () -> Void
     var onKeyDown: ((NSEvent) -> Bool)? = nil
+
+    private var hasText: Bool {
+        !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
 
     var body: some View {
         HStack(spacing: 12) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 16, weight: .medium))
-                .foregroundStyle(.secondary)
-
             ZStack(alignment: .leading) {
-                if text.isEmpty {
-                    Text(placeholder)
-                        .font(.system(size: 17))
-                        .foregroundStyle(.secondary)
-                        .allowsHitTesting(false)
-                }
+                Text(placeholder)
+                    .font(.system(size: 17))
+                    .foregroundStyle(.secondary)
+                    .opacity(text.isEmpty ? 1 : 0)
+                    .allowsHitTesting(false)
 
                 FocusedTextField(
                     text: $text,
@@ -761,9 +746,80 @@ private struct CommandMenuTextInputRow: View {
                 state: voiceState,
                 level: voiceLevel
             )
+
+            CommandMenuInputActionButton(
+                hasText: hasText,
+                isStreaming: isStreaming,
+                voiceState: voiceState,
+                onSubmit: onSubmit,
+                onStop: onStop,
+                onVoice: onVoice
+            )
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 16)
+    }
+}
+
+private struct CommandMenuInputActionButton: View {
+    let hasText: Bool
+    let isStreaming: Bool
+    let voiceState: SearchViewModel.VoiceState
+    let onSubmit: () -> Void
+    let onStop: () -> Void
+    let onVoice: () -> Void
+
+    @State private var isHovering = false
+
+    private var isVoiceActive: Bool {
+        switch voiceState {
+        case .listening, .transcribing:
+            return true
+        case .idle, .failed:
+            return false
+        }
+    }
+
+    var body: some View {
+        Group {
+            if isStreaming {
+                actionButton(
+                    icon: "stop.fill",
+                    action: onStop,
+                    accessibilityLabel: "Stop"
+                )
+            } else if hasText {
+                actionButton(
+                    icon: "arrow.up",
+                    action: onSubmit,
+                    accessibilityLabel: "Send"
+                )
+            } else {
+                actionButton(
+                    icon: isVoiceActive ? "mic.fill" : "mic",
+                    action: onVoice,
+                    accessibilityLabel: "Voice input"
+                )
+            }
+        }
+        .animation(.easeInOut(duration: 0.15), value: isStreaming)
+        .animation(.easeInOut(duration: 0.15), value: hasText)
+    }
+
+    private func actionButton(icon: String, action: @escaping () -> Void, accessibilityLabel: String) -> some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(isHovering ? Color.primary : Color.secondary)
+                .frame(width: 24, height: 24)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering in
+            isHovering = hovering
+        }
+        .accessibilityLabel(accessibilityLabel)
+        .transition(.opacity)
     }
 }
 
@@ -912,6 +968,36 @@ private struct SettingsMenuButtonStyle: ButtonStyle {
                         configuration.isPressed ? 0.14 : (isHovering ? 0.08 : 0)
                     ))
             )
+    }
+}
+
+private struct CommandMenuContentFramePreferenceKey: PreferenceKey {
+    static var defaultValue: CGRect = .zero
+
+    static func reduce(value: inout CGRect, nextValue: () -> CGRect) {
+        value = nextValue()
+    }
+}
+
+private struct CommandMenuPinButton: View {
+    @Binding var isPinned: Bool
+    @State private var isHovering = false
+
+    var body: some View {
+        Button {
+            isPinned.toggle()
+        } label: {
+            Image(systemName: isPinned ? "pin.fill" : "pin")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(isPinned ? .primary : .secondary)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 6)
+        }
+        .buttonStyle(SettingsMenuButtonStyle(isHovering: isHovering))
+        .onHover { hovering in
+            isHovering = hovering
+        }
+        .help(isPinned ? "Unpin (click outside will not dismiss)" : "Pin (keep open while clicking elsewhere)")
     }
 }
 

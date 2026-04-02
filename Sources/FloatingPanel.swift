@@ -61,6 +61,9 @@ class FloatingPanel: NSPanel {
     var onPanelDestroyed: ((FloatingPanel) -> Void)?
     var onGhostCursorIntent: ((GhostCursorIntent) -> Void)?
     var onTransitionToCommandMenu: ((FloatingPanel) -> Void)?
+    /// If set and returns true, the submission was handled externally (e.g. routed
+    /// to the command menu chat). The floating panel skips its default behavior.
+    var onInterceptSubmission: ((String) -> Bool)?
     weak var highlightOverlayStore: HighlightOverlayStore?
 
     var taskDisplayTitle: String {
@@ -147,6 +150,11 @@ class FloatingPanel: NSPanel {
         // Wire up the submit callback
         searchViewModel.onSubmit = { [weak self] context, workingDirectoryURL in
             guard let self else { return }
+            // Allow external interception (e.g. routing to command menu chat)
+            if let intercept = self.onInterceptSubmission, intercept(self.searchViewModel.query) {
+                self.dismiss(restorePreviousFocus: false)
+                return
+            }
             if self.onTransitionToCommandMenu != nil {
                 orderOut(nil)
                 let (screenshotURL, _) = searchViewModel.captureCurrentScreenScreenshot()
