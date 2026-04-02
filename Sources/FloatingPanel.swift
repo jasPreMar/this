@@ -67,6 +67,10 @@ class FloatingPanel: NSPanel {
     /// to the command menu chat). The floating panel skips its default behavior.
     var onInterceptSubmission: ((String) -> Bool)?
     weak var highlightOverlayStore: HighlightOverlayStore?
+    var quickActionCoordinator: QuickActionCoordinator?
+    var quickActionSurface: FastCommandSurface = .cursorPanel
+    var externalInvocationSnapshot: ExternalFocusSnapshot?
+    private var recentQuickActionInvocationSnapshot: ExternalFocusSnapshot?
 
     var taskDisplayTitle: String {
         let fallback = searchViewModel.query.isEmpty ? "New task" : searchViewModel.query
@@ -84,13 +88,7 @@ class FloatingPanel: NSPanel {
     }
 
     var isTaskRunning: Bool {
-        guard let manager = searchViewModel.claudeManager else { return false }
-        switch manager.status {
-        case .waiting, .streaming:
-            return true
-        case .done, .error:
-            return false
-        }
+        searchViewModel.claudeManager?.status.isActive ?? false
     }
 
     var currentStreamStartedAt: Date? {
@@ -157,23 +155,30 @@ class FloatingPanel: NSPanel {
                 self.dismiss(restorePreviousFocus: false)
                 return
             }
+            let rawPrompt = self.searchViewModel.query.trimmingCharacters(in: .whitespacesAndNewlines)
             if self.onTransitionToCommandMenu != nil {
                 orderOut(nil)
-                let (screenshotURL, _) = searchViewModel.captureCurrentScreenScreenshot()
-                self.startHeadless(
-                    message: context,
-                    screenshotURL: screenshotURL,
+                self.startHeadlessWithRouting(
+                    rawPrompt: rawPrompt,
+                    claudeMessage: context,
                     workingDirectoryURL: workingDirectoryURL
                 )
                 self.onTransitionToCommandMenu?(self)
             } else {
-                let (screenshotURL, _) = searchViewModel.captureCurrentScreenScreenshot()
-                self.transitionToTerminal(
-                    message: context,
-                    screenshotURL: screenshotURL,
+                self.transitionToTerminalWithRouting(
+                    rawPrompt: rawPrompt,
+                    claudeMessage: context,
                     workingDirectoryURL: workingDirectoryURL
                 )
             }
+        }
+        searchViewModel.onQuickActionSubmit = { [weak self] rawPrompt, workingDirectoryURL in
+            guard let self else { return false }
+            return self.routeChatTurnBeforeClaude(
+                rawPrompt: rawPrompt,
+                claudeMessage: rawPrompt,
+                workingDirectoryURL: workingDirectoryURL
+            )
         }
         searchViewModel.onMessageSent = { [weak self] in
             self?.markTaskActivity()
@@ -347,6 +352,7 @@ class FloatingPanel: NSPanel {
             elementFrame: frame,
             windowFrame: frame,
             screenPoint: mouseLocation,
+            fileSystemURL: nil,
             workingDirectoryURL: workingDirectoryURL
         )
     }
@@ -415,13 +421,7 @@ class FloatingPanel: NSPanel {
         }
     }
 
-    func transitionToTerminal(
-        message: String,
-        screenshotURL: URL? = nil,
-        workingDirectoryURL: URL? = nil,
-        centerWindow: Bool = false,
-        restoreOnly: Bool = false
-    ) {
+    private func prepareTaskWindow(centerWindow: Bool) {
         isTerminalMode = true
         isCursorFollowing = false
         removeAllMonitors()
@@ -453,6 +453,132 @@ class FloatingPanel: NSPanel {
         makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
         notifyTaskStateChanged()
+    }
+
+    private func prepareHeadlessTask() {
+        isTerminalMode = true
+        isCursorFollowing = false
+        removeAllMonitors()
+        beginPersistentTaskIfNeeded()
+    }
+
+    private func makeConversationManager() -> ClaudeProcessManager {
+        let manager = ClaudeProcessManager()
+        manager.onComplete = { [weak self] response in
+            let completedEvents = manager.events
+            manager.outputText = ""
+            manager.events = []
+            self?.searchViewModel.chatHistory.append(
+                ChatMessage(
+                    role: "assistant",
+                    text: response,
+                    events: completedEvents,
+                    structuredUI: manager.structuredUIResponse
+                )
+            )
+            if let sid = manager.sessionId {
+                self?.searchViewModel.currentSessionId = sid
+                self?.searchViewModel.hasStartedClaudeConversation = true
+            }
+            self?.saveChatSession()
+            self?.onStreamingComplete?()
+        }
+        return manager
+    }
+
+    private func attachConversationManager(
+        _ manager: ClaudeProcessManager,
+        workingDirectoryURL: URL?
+    ) {
+        searchViewModel.claudeManager = manager
+        searchViewModel.isChatMode = true
+        searchViewModel.currentSessionWorkingDirectoryURL = workingDirectoryURL
+        notifyTaskStateChanged()
+    }
+
+    private func currentInvocationSnapshot() -> ExternalFocusSnapshot? {
+        if let liveSnapshot = ExternalFocusInspector.captureCurrent() {
+            return liveSnapshot
+        }
+        if let recentQuickActionInvocationSnapshot {
+            return recentQuickActionInvocationSnapshot
+        }
+        if let externalInvocationSnapshot {
+            return externalInvocationSnapshot
+        }
+
+        let app = focusRestorationState?.app
+            ?? focusRestorationState.flatMap { runningApplication(for: $0) }
+        let windowTitle = focusRestorationState?.focusedWindow.flatMap {
+            ExternalFocusInspector.stringAttribute("AXTitle", of: $0)
+                ?? ExternalFocusInspector.stringAttribute(kAXTitleAttribute as String, of: $0)
+        }
+        return ExternalFocusSnapshot(
+            appName: app?.localizedName,
+            bundleIdentifier: app?.bundleIdentifier ?? focusRestorationState?.bundleIdentifier,
+            processIdentifier: app?.processIdentifier ?? focusRestorationState?.processIdentifier,
+            windowTitle: windowTitle
+        )
+    }
+
+    private func beginPreClaudeTask(
+        rawPrompt: String,
+        claudeMessage: String,
+        workingDirectoryURL: URL?,
+        userAlreadyRecorded: Bool,
+        screenshotProvider: @escaping () -> (URL?, String)
+    ) {
+        if !userAlreadyRecorded {
+            searchViewModel.chatHistory.append(ChatMessage(role: "user", text: rawPrompt))
+            searchViewModel.query = ""
+        }
+
+        let manager = makeConversationManager()
+        attachConversationManager(manager, workingDirectoryURL: workingDirectoryURL)
+        manager.beginRouting()
+
+        let request = QuickActionRequest(
+            prompt: rawPrompt,
+            claudePrompt: claudeMessage,
+            surface: quickActionSurface,
+            hoveredParts: searchViewModel.hoveredParts,
+            hoveredFileURL: searchViewModel.hoveredFileSystemURL,
+            hoveredWorkingDirectoryURL: workingDirectoryURL ?? searchViewModel.hoveredWorkingDirectoryURL,
+            allowsDeicticFileTarget: searchViewModel.allowsDeicticFileTarget,
+            selectedText: searchViewModel.selectedText,
+            invocationSnapshot: currentInvocationSnapshot()
+        )
+
+        let outcome = quickActionCoordinator?.route(request) ?? .fallback(claudeMessage)
+        switch outcome {
+        case .local(let result):
+            if let snapshot = ExternalFocusInspector.captureCurrent() ?? result.resultingInvocationSnapshot {
+                recentQuickActionInvocationSnapshot = snapshot
+            }
+            manager.completeLocally(result)
+        case .fallback(let fallbackMessage):
+            let outboundMessage = searchViewModel.bootstrapClaudeMessageForFirstClaudeTurn(
+                currentUserText: rawPrompt,
+                claudePrompt: fallbackMessage
+            )
+            searchViewModel.hasStartedClaudeConversation = true
+            let (screenshotURL, _) = screenshotProvider()
+            manager.startClaude(
+                message: outboundMessage,
+                screenshotURL: screenshotURL,
+                workingDirectoryURL: workingDirectoryURL
+            )
+        }
+    }
+
+    func transitionToTerminal(
+        message: String,
+        screenshotURL: URL? = nil,
+        workingDirectoryURL: URL? = nil,
+        centerWindow: Bool = false,
+        restoreOnly: Bool = false
+    ) {
+        prepareTaskWindow(centerWindow: centerWindow)
 
         if restoreOnly {
             // Restoring a persisted session — chat history is already populated
@@ -463,28 +589,14 @@ class FloatingPanel: NSPanel {
             return
         }
 
-        // Switch to chat mode — the PanelContentView handles the rest
-        searchViewModel.chatHistory.append(ChatMessage(role: "user", text: searchViewModel.query))
+        let rawPrompt = searchViewModel.query.trimmingCharacters(in: .whitespacesAndNewlines)
+        let manager = makeConversationManager()
+        attachConversationManager(manager, workingDirectoryURL: workingDirectoryURL)
+        searchViewModel.chatHistory.append(ChatMessage(role: "user", text: rawPrompt))
         searchViewModel.query = ""
 
-        let manager = ClaudeProcessManager()
-        manager.onComplete = { [weak self] response in
-            let completedEvents = manager.events
-            manager.outputText = ""
-            manager.events = []
-            self?.searchViewModel.chatHistory.append(ChatMessage(role: "assistant", text: response, events: completedEvents, structuredUI: manager.structuredUIResponse))
-            // Capture session ID for follow-up messages
-            if let sid = manager.sessionId {
-                self?.searchViewModel.currentSessionId = sid
-            }
-            self?.onStreamingComplete?()
-        }
-        searchViewModel.claudeManager = manager
-        searchViewModel.isChatMode = true
-        searchViewModel.currentSessionWorkingDirectoryURL = workingDirectoryURL
-        notifyTaskStateChanged()
-
-        manager.start(
+        searchViewModel.hasStartedClaudeConversation = true
+        manager.startClaude(
             message: message,
             screenshotURL: screenshotURL,
             workingDirectoryURL: workingDirectoryURL
@@ -493,14 +605,16 @@ class FloatingPanel: NSPanel {
 
     func startTaskFromMenu(query: String) {
         searchViewModel.configureHomeFolderContext()
+        quickActionSurface = .commandMenu
         searchViewModel.query = query
-        let message = searchViewModel.buildContextMessage()
-        let (screenshotURL, _) = searchViewModel.captureFullScreenScreenshot()
-        transitionToTerminal(
-            message: message,
-            screenshotURL: screenshotURL,
+        transitionToTerminalWithRouting(
+            rawPrompt: query,
+            claudeMessage: searchViewModel.buildContextMessage(),
             workingDirectoryURL: searchViewModel.hoveredWorkingDirectoryURL,
-            centerWindow: true
+            centerWindow: true,
+            screenshotProvider: { [weak self] in
+                self?.searchViewModel.captureFullScreenScreenshot() ?? (nil, "")
+            }
         )
     }
 
@@ -509,31 +623,16 @@ class FloatingPanel: NSPanel {
         screenshotURL: URL? = nil,
         workingDirectoryURL: URL? = nil
     ) {
-        isTerminalMode = true
-        isCursorFollowing = false
-        removeAllMonitors()
-        beginPersistentTaskIfNeeded()
+        prepareHeadlessTask()
 
-        searchViewModel.chatHistory.append(ChatMessage(role: "user", text: searchViewModel.query))
+        let rawPrompt = searchViewModel.query.trimmingCharacters(in: .whitespacesAndNewlines)
+        let manager = makeConversationManager()
+        attachConversationManager(manager, workingDirectoryURL: workingDirectoryURL)
+        searchViewModel.chatHistory.append(ChatMessage(role: "user", text: rawPrompt))
         searchViewModel.query = ""
 
-        let manager = ClaudeProcessManager()
-        manager.onComplete = { [weak self] response in
-            let completedEvents = manager.events
-            manager.outputText = ""
-            manager.events = []
-            self?.searchViewModel.chatHistory.append(ChatMessage(role: "assistant", text: response, events: completedEvents, structuredUI: manager.structuredUIResponse))
-            if let sid = manager.sessionId {
-                self?.searchViewModel.currentSessionId = sid
-            }
-            self?.onStreamingComplete?()
-        }
-        searchViewModel.claudeManager = manager
-        searchViewModel.isChatMode = true
-        searchViewModel.currentSessionWorkingDirectoryURL = workingDirectoryURL
-        notifyTaskStateChanged()
-
-        manager.start(
+        searchViewModel.hasStartedClaudeConversation = true
+        manager.startClaude(
             message: message,
             screenshotURL: screenshotURL,
             workingDirectoryURL: workingDirectoryURL
@@ -542,14 +641,71 @@ class FloatingPanel: NSPanel {
 
     func startTaskFromMenuHeadless(query: String) {
         searchViewModel.configureHomeFolderContext()
+        quickActionSurface = .commandMenu
         searchViewModel.query = query
-        let message = searchViewModel.buildContextMessage()
-        let (screenshotURL, _) = searchViewModel.captureFullScreenScreenshot()
-        startHeadless(
-            message: message,
-            screenshotURL: screenshotURL,
-            workingDirectoryURL: searchViewModel.hoveredWorkingDirectoryURL
+        startHeadlessWithRouting(
+            rawPrompt: query,
+            claudeMessage: searchViewModel.buildContextMessage(),
+            workingDirectoryURL: searchViewModel.hoveredWorkingDirectoryURL,
+            screenshotProvider: { [weak self] in
+                self?.searchViewModel.captureFullScreenScreenshot() ?? (nil, "")
+            }
         )
+    }
+
+    func transitionToTerminalWithRouting(
+        rawPrompt: String,
+        claudeMessage: String,
+        workingDirectoryURL: URL?,
+        centerWindow: Bool = false,
+        screenshotProvider: (() -> (URL?, String))? = nil
+    ) {
+        prepareTaskWindow(centerWindow: centerWindow)
+        beginPreClaudeTask(
+            rawPrompt: rawPrompt,
+            claudeMessage: claudeMessage,
+            workingDirectoryURL: workingDirectoryURL,
+            userAlreadyRecorded: false,
+            screenshotProvider: screenshotProvider ?? { [weak self] in
+                self?.searchViewModel.captureCurrentScreenScreenshot() ?? (nil, "")
+            }
+        )
+    }
+
+    func startHeadlessWithRouting(
+        rawPrompt: String,
+        claudeMessage: String,
+        workingDirectoryURL: URL?,
+        screenshotProvider: (() -> (URL?, String))? = nil
+    ) {
+        prepareHeadlessTask()
+        beginPreClaudeTask(
+            rawPrompt: rawPrompt,
+            claudeMessage: claudeMessage,
+            workingDirectoryURL: workingDirectoryURL,
+            userAlreadyRecorded: false,
+            screenshotProvider: screenshotProvider ?? { [weak self] in
+                self?.searchViewModel.captureCurrentScreenScreenshot() ?? (nil, "")
+            }
+        )
+    }
+
+    private func routeChatTurnBeforeClaude(
+        rawPrompt: String,
+        claudeMessage: String,
+        workingDirectoryURL: URL?
+    ) -> Bool {
+        guard !searchViewModel.hasStartedClaudeConversation else { return false }
+        beginPreClaudeTask(
+            rawPrompt: rawPrompt,
+            claudeMessage: claudeMessage,
+            workingDirectoryURL: workingDirectoryURL,
+            userAlreadyRecorded: true,
+            screenshotProvider: { [weak self] in
+                self?.searchViewModel.captureCurrentScreenScreenshot() ?? (nil, "")
+            }
+        )
+        return true
     }
 
     func restoreHeadless(workingDirectoryURL: URL?) {
@@ -668,6 +824,9 @@ class FloatingPanel: NSPanel {
         guard preservesTaskHistory else { return }
 
         switch status {
+        case .routing:
+            taskCompletedAt = nil
+            taskLastActivityAt = Date()
         case .waiting:
             lastCompletedCommandMenuAction = .reveal
             taskCompletedAt = nil
@@ -1221,7 +1380,7 @@ class FloatingPanel: NSPanel {
     // Handle Escape: stop streaming if active, otherwise close
     override func cancelOperation(_ sender: Any?) {
         if let manager = searchViewModel.claudeManager,
-           manager.status == .waiting || manager.status == .streaming {
+           manager.status.isActive {
             manager.stop()
         } else {
             close()
@@ -1366,14 +1525,7 @@ class FloatingPanel: NSPanel {
     }
 
     private var isActivelyStreamingResponse: Bool {
-        guard let manager = searchViewModel.claudeManager else { return false }
-
-        switch manager.status {
-        case .waiting, .streaming:
-            return true
-        case .done, .error:
-            return false
-        }
+        searchViewModel.claudeManager?.status.isActive ?? false
     }
 
     private func prepareForTextInputFocus() {

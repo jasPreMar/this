@@ -133,6 +133,147 @@ func testElectronGroupDrilling() {
     assert(findBestChild(in: root8) == nil, "scansUpToTwentyChildren")
 }
 
+// ─── Fast Command Router Tests ──────────────────────────────────────
+
+func testFastCommandRouter() {
+    let classifier = RuleBasedFastCommandClassifier()
+    let catalog = FastCommandCatalog(apps: [
+        FastAppCandidate(name: "Finder", bundleIdentifier: "com.apple.finder", isRunning: true),
+        FastAppCandidate(name: "Safari", bundleIdentifier: "com.apple.Safari", isRunning: true),
+        FastAppCandidate(name: "Slack", bundleIdentifier: "com.tinyspeck.slackmacgap", isRunning: true),
+        FastAppCandidate(name: "Signal", bundleIdentifier: "org.signal.Signal", isRunning: false),
+    ])
+
+    let openFinder = classifier.decide(
+        context: FastCommandContext(prompt: "open Finder", surface: .cursorPanel),
+        catalog: catalog
+    )
+    if case .execute(let match) = openFinder {
+        assert(match.action == .open, "routerOpenFinderAction")
+        assert(match.executionPlan == .app(action: .open, target: .named("Finder")), "routerOpenFinderPlan")
+        assert(match.confidence >= 0.95, "routerOpenFinderConfidence")
+    } else {
+        assert(false, "routerOpenFinderExecutes")
+    }
+
+    let implicitSafari = classifier.decide(
+        context: FastCommandContext(prompt: "saf", surface: .commandMenu),
+        catalog: catalog
+    )
+    if case .execute(let match) = implicitSafari {
+        assert(match.executionPlan == .app(action: .open, target: .named("Safari")), "routerImplicitSafariPlan")
+    } else {
+        assert(false, "routerImplicitSafariExecutes")
+    }
+
+    let typoSafari = classifier.decide(
+        context: FastCommandContext(prompt: "open safri", surface: .commandMenu),
+        catalog: catalog
+    )
+    if case .execute(let match) = typoSafari {
+        assert(match.executionPlan == .app(action: .open, target: .named("Safari")), "routerTypoSafariPlan")
+    } else {
+        assert(false, "routerTypoSafariExecutes")
+    }
+
+    let openHoveredFile = classifier.decide(
+        context: FastCommandContext(
+            prompt: "open this file",
+            surface: .cursorPanel,
+            hoveredFilePath: "/tmp/budget.xlsx",
+            hoveredWorkingDirectoryPath: "/tmp"
+        ),
+        catalog: catalog
+    )
+    if case .execute(let match) = openHoveredFile {
+        assert(match.executionPlan == .file(action: .open, target: .hoveredFile(pathHint: "/tmp/budget.xlsx")), "routerHoveredFilePlan")
+    } else {
+        assert(false, "routerHoveredFileExecutes")
+    }
+
+    let maximizeWindow = classifier.decide(
+        context: FastCommandContext(
+            prompt: "maximize this window",
+            surface: .cursorPanel,
+            invocationSnapshot: FastInvocationSnapshot(appName: "Safari", bundleIdentifier: "com.apple.Safari", windowTitle: "Docs")
+        ),
+        catalog: catalog
+    )
+    if case .execute(let match) = maximizeWindow {
+        assert(match.executionPlan == .window(action: .maximize, target: .frontmost(appName: "Safari")), "routerMaximizeWindowPlan")
+    } else {
+        assert(false, "routerMaximizeWindowExecutes")
+    }
+
+    let findFile = classifier.decide(
+        context: FastCommandContext(prompt: "find budget.xlsx", surface: .commandMenu),
+        catalog: catalog
+    )
+    if case .execute(let match) = findFile {
+        assert(match.executionPlan == .file(action: .reveal, target: .query("budget.xlsx")), "routerFindFilePlan")
+    } else {
+        assert(false, "routerFindFileExecutes")
+    }
+
+    let ambiguous = classifier.decide(
+        context: FastCommandContext(prompt: "s", surface: .commandMenu),
+        catalog: catalog
+    )
+    assert(ambiguous == .fallback(.ambiguousSubject), "routerAmbiguousSubjectFallsBack")
+
+    let whySlow = classifier.decide(
+        context: FastCommandContext(prompt: "why is Finder slow", surface: .cursorPanel),
+        catalog: catalog
+    )
+    assert(whySlow == .fallback(.reasoningRequired), "routerReasoningFallsBack")
+
+    let chained = classifier.decide(
+        context: FastCommandContext(prompt: "open Finder and maximize it", surface: .cursorPanel),
+        catalog: catalog
+    )
+    assert(chained == .fallback(.multiStep), "routerMultiStepFallsBack")
+
+    let copyText = classifier.decide(
+        context: FastCommandContext(prompt: "copy this text", surface: .cursorPanel),
+        catalog: catalog
+    )
+    assert(copyText == .fallback(.textTransform), "routerCopyTextFallsBack")
+
+    let fixError = classifier.decide(
+        context: FastCommandContext(prompt: "fix this error", surface: .cursorPanel),
+        catalog: catalog
+    )
+    assert(fixError == .fallback(.reasoningRequired), "routerFixFallsBack")
+
+    let missingHover = classifier.decide(
+        context: FastCommandContext(prompt: "open this file", surface: .cursorPanel),
+        catalog: catalog
+    )
+    assert(missingHover == .fallback(.noSubject), "routerMissingHoverFallsBack")
+
+    let commandMenuHomeSeed = classifier.decide(
+        context: FastCommandContext(
+            prompt: "open this file",
+            surface: .commandMenu,
+            hoveredWorkingDirectoryPath: "/Users/tester",
+            allowsDeicticFileTarget: false
+        ),
+        catalog: catalog
+    )
+    assert(commandMenuHomeSeed == .fallback(.noSubject), "routerCommandMenuHomeSeedFallsBack")
+
+    let commandMenuCopySeed = classifier.decide(
+        context: FastCommandContext(
+            prompt: "copy this path",
+            surface: .commandMenu,
+            hoveredWorkingDirectoryPath: "/Users/tester",
+            allowsDeicticFileTarget: false
+        ),
+        catalog: catalog
+    )
+    assert(commandMenuCopySeed == .fallback(.noSubject), "routerCommandMenuCopySeedFallsBack")
+}
+
 // ─── Assistant Response Directive Tests ─────────────────────────────
 
 func testAssistantResponseDirectives() {
@@ -261,6 +402,7 @@ struct RegressionTests {
         testCoordinateConversion()
         testRoleSets()
         testElectronGroupDrilling()
+        testFastCommandRouter()
         testAssistantResponseDirectives()
 
         output("")

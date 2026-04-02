@@ -302,6 +302,7 @@ private struct ChatSettingsPane: View {
             VStack(spacing: 14) {
                 defaultModelCard
                 fastModeCard
+                quickActionsCard
                 structuredUICard
             }
         }
@@ -384,6 +385,26 @@ private struct ChatSettingsPane: View {
                 Spacer()
 
                 Toggle("", isOn: $settingsStore.fastModeEnabled)
+                    .toggleStyle(.switch)
+                    .labelsHidden()
+            }
+        }
+    }
+
+    private var quickActionsCard: some View {
+        SettingsCard {
+            HStack(alignment: .center, spacing: 16) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Quick actions before Claude")
+                        .font(.system(size: 15, weight: .semibold))
+                    Text("Try a fast deterministic app, window, or file action before launching the full Claude flow.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+
+                Toggle("", isOn: $settingsStore.quickActionsEnabled)
                     .toggleStyle(.switch)
                     .labelsHidden()
             }

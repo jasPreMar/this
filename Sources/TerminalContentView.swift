@@ -23,10 +23,22 @@ enum StreamEvent: Identifiable, Equatable {
 // MARK: - Stream Status
 
 enum StreamStatus: Equatable {
+    case routing
     case waiting
     case streaming
     case done
     case error(String)
+}
+
+extension StreamStatus {
+    var isActive: Bool {
+        switch self {
+        case .routing, .waiting, .streaming:
+            return true
+        case .done, .error:
+            return false
+        }
+    }
 }
 
 // MARK: - Claude Process Manager
@@ -37,11 +49,15 @@ class ClaudeProcessManager: ObservableObject {
         didSet {
             if oldValue != status {
                 switch status {
-                case .streaming:
-                    if oldValue != .streaming {
+                case .routing:
+                    if currentStreamStartedAt == nil {
                         currentStreamStartedAt = Date()
                     }
-                case .waiting, .done, .error:
+                case .waiting, .streaming:
+                    if currentStreamStartedAt == nil {
+                        currentStreamStartedAt = Date()
+                    }
+                case .done, .error:
                     currentStreamStartedAt = nil
                 }
                 onStatusChange?(status)
@@ -64,26 +80,38 @@ class ClaudeProcessManager: ObservableObject {
     private let queue = DispatchQueue(label: "claude-stream", qos: .userInitiated)
     private var isStopped = false
 
-    func start(
+    func beginRouting() {
+        resetForNewRun()
+        status = .routing
+    }
+
+    func completeLocally(_ result: LocalExecutionResult) {
+        if currentStreamStartedAt == nil {
+            currentStreamStartedAt = Date()
+        }
+        if let intent = result.ghostCursorIntent {
+            onToolActivity?(intent)
+        }
+        events = [.toolCall(id: UUID().uuidString, name: "quick_action", input: result.eventInput)]
+        outputText = result.assistantText
+        status = .done
+        onComplete?(result.assistantText)
+    }
+
+    func startClaude(
         message: String,
         screenshotURL: URL? = nil,
         resumeSessionId: String? = nil,
         workingDirectoryURL: URL? = nil
     ) {
-        // Reset stale events from previous messages
-        DispatchQueue.main.async {
-            self.events = []
-            self.outputText = ""
-            self.status = .waiting
-            self.activeToolName = nil
-            self.activeToolStartTime = nil
-            self.currentStreamStartedAt = nil
-            self.structuredUIResponse = nil
+        if status != .routing {
+            resetForNewRun()
+        } else {
+            isStopped = false
+            accumulated = ""
+            buffer = Data()
+            status = .waiting
         }
-        isStopped = false
-        accumulated = ""
-        buffer = Data()
-        completionAction = .reveal
 
 
         guard let claudePath = resolveClaudeBinaryPath() else {
@@ -518,7 +546,6 @@ class ClaudeProcessManager: ObservableObject {
         DispatchQueue.main.async {
             self.activeToolName = nil
             self.activeToolStartTime = nil
-            self.currentStreamStartedAt = nil
         }
         if let proc = process, proc.isRunning {
             let pid = proc.processIdentifier
@@ -542,6 +569,34 @@ class ClaudeProcessManager: ObservableObject {
 
     deinit {
         process?.terminate()
+    }
+
+    func start(
+        message: String,
+        screenshotURL: URL? = nil,
+        resumeSessionId: String? = nil,
+        workingDirectoryURL: URL? = nil
+    ) {
+        startClaude(
+            message: message,
+            screenshotURL: screenshotURL,
+            resumeSessionId: resumeSessionId,
+            workingDirectoryURL: workingDirectoryURL
+        )
+    }
+
+    private func resetForNewRun() {
+        events = []
+        outputText = ""
+        status = .waiting
+        activeToolName = nil
+        activeToolStartTime = nil
+        currentStreamStartedAt = nil
+        structuredUIResponse = nil
+        completionAction = .reveal
+        isStopped = false
+        accumulated = ""
+        buffer = Data()
     }
 }
 
@@ -724,6 +779,7 @@ struct ToolCallEventRow: View {
 
     private func iconName(for tool: String) -> String {
         switch tool.lowercased() {
+        case "quick_action": return "bolt.fill"
         case "bash": return "terminal"
         case "read": return "doc.text"
         case "write": return "square.and.pencil"
@@ -736,6 +792,7 @@ struct ToolCallEventRow: View {
 
     private func displayName(for tool: String) -> String {
         switch tool.lowercased() {
+        case "quick_action": return "Quick action"
         case "bash": return "Run command"
         case "read": return "Read file"
         case "write": return "Write file"

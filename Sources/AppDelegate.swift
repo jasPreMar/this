@@ -3,8 +3,8 @@ import SwiftUI
 import ApplicationServices
 import Carbon
 import Sparkle
-import WebKit
 import ThisCore
+import WebKit
 
 // Global reference for CGEventTap callback (C function pointers can't capture context)
 private weak var sharedAppDelegate: AppDelegate?
@@ -183,6 +183,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     private var workspaceNotificationObservers: [NSObjectProtocol] = []
     private var hoverLoggingSession: HoverLoggingSession?
     private var defaultsObserver: NSObjectProtocol?
+    private let quickActionCoordinator = QuickActionCoordinator()
+    private var commandMenuInvocationSnapshot: ExternalFocusSnapshot?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         sharedAppDelegate = self
@@ -770,6 +772,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         commandMenuCloseWorkItem?.cancel()
         commandMenuCloseWorkItem = nil
         commandMenuDismissing = false
+        commandMenuInvocationSnapshot = ExternalFocusInspector.captureCurrent()
         setCommandMenuChatRecord(resolvedCommandMenuChatRecord(preferred: navigateToChat))
         commandMenuPresentationSource = source
         commandMenuPresentationID = UUID()
@@ -1058,6 +1061,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
 
     private func makePanel() -> FloatingPanel {
         let panel = FloatingPanel()
+        panel.quickActionCoordinator = quickActionCoordinator
         panel.onCommandKeyDropped = { [weak self, weak panel] in
             guard let panel else { return }
             self?.commandKeyHeld = false
@@ -1166,6 +1170,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     @discardableResult
     func launchTaskFromCommandMenu(query: String) -> TaskSessionRecord? {
         let panel = makePanel()
+        panel.quickActionSurface = .commandMenu
+        panel.externalInvocationSnapshot = commandMenuInvocationSnapshot
         panels.append(panel)
         panel.startTaskFromMenuHeadless(query: query)
         let key = ObjectIdentifier(panel)
@@ -1247,7 +1253,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     func handleCommandMenuEscape() {
         if let chatRecord = commandMenuChatRecord {
             if let manager = chatRecord.panel?.searchViewModel.claudeManager,
-               manager.status == .waiting || manager.status == .streaming {
+               manager.status.isActive {
                 manager.stop()
             } else {
                 clearCommandMenuChatRecord()
@@ -1275,6 +1281,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         }
         panel.searchViewModel.currentSessionId = session.sessionId
         panel.searchViewModel.currentSessionWorkingDirectoryURL = workingDirectoryURL
+        panel.searchViewModel.hasStartedClaudeConversation = session.sessionId != nil
 
         panel.restoreHeadless(workingDirectoryURL: workingDirectoryURL)
 
