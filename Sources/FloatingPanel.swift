@@ -43,6 +43,13 @@ class FloatingPanel: NSPanel {
     private var pinnedInputVisible = false
     private var escapeKeyMonitor: Any?
     private var pinnedLocalMouseMonitor: Any?
+    private var isTaskIconMode = false
+    private var taskIconWindowID: CGWindowID?
+    private var taskIconWindowOffset: CGPoint?
+    private var taskIconAnchorOrigin: NSPoint? // top-left anchor for the 36x36 icon
+    private var taskIconFollowTimer: Timer?
+    private var taskIconHoverMonitor: Any?
+    private var taskIconLocalHoverMonitor: Any?
     private var cancellables = Set<AnyCancellable>()
     private(set) var taskStartedAt: Date?
     private(set) var taskCompletedAt: Date?
@@ -157,13 +164,11 @@ class FloatingPanel: NSPanel {
             }
             let rawPrompt = self.searchViewModel.query.trimmingCharacters(in: .whitespacesAndNewlines)
             if self.onTransitionToCommandMenu != nil {
-                orderOut(nil)
-                self.startHeadlessWithRouting(
+                self.startTaskIconMode(
                     rawPrompt: rawPrompt,
                     claudeMessage: context,
                     workingDirectoryURL: workingDirectoryURL
                 )
-                self.onTransitionToCommandMenu?(self)
             } else {
                 self.transitionToTerminalWithRouting(
                     rawPrompt: rawPrompt,
@@ -718,6 +723,229 @@ class FloatingPanel: NSPanel {
         searchViewModel.claudeManager = nil
         searchViewModel.isChatMode = true
         searchViewModel.currentSessionWorkingDirectoryURL = workingDirectoryURL
+    }
+
+    // MARK: - Task Icon Mode
+
+    func startTaskIconMode(
+        rawPrompt: String,
+        claudeMessage: String,
+        workingDirectoryURL: URL?
+    ) {
+        isTaskIconMode = true
+        prepareHeadlessTask()
+
+        // Capture the CGWindowID of the window under the cursor for tracking
+        captureTrackedWindow()
+
+        // Use the shared routing/task setup
+        beginPreClaudeTask(
+            rawPrompt: rawPrompt,
+            claudeMessage: claudeMessage,
+            workingDirectoryURL: workingDirectoryURL,
+            userAlreadyRecorded: false,
+            screenshotProvider: { [weak self] in
+                self?.searchViewModel.captureCurrentScreenScreenshot() ?? (nil, "")
+            }
+        )
+
+        // Animate to minimal icon
+        searchViewModel.isMinimalMode = true
+        searchViewModel.isTaskIconMode = true
+
+        let iconSize: CGFloat = 36
+        let anchorTop = frame.maxY
+        let iconOrigin = NSPoint(
+            x: frame.minX,
+            y: anchorTop - iconSize
+        )
+        taskIconAnchorOrigin = iconOrigin
+
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.25
+            context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            self.animator().setFrame(
+                NSRect(origin: iconOrigin, size: CGSize(width: iconSize, height: iconSize)),
+                display: true
+            )
+        }
+
+        // Start window-follow timer
+        startTaskIconFollowTimer()
+
+        // Install hover monitors
+        taskIconHoverMonitor = NSEvent.addGlobalMonitorForEvents(matching: .mouseMoved) { [weak self] _ in
+            self?.handleTaskIconMouseMove()
+        }
+        taskIconLocalHoverMonitor = NSEvent.addLocalMonitorForEvents(matching: .mouseMoved) { [weak self] event in
+            self?.handleTaskIconMouseMove()
+            return event
+        }
+
+        installEscapeMonitor()
+    }
+
+    private func captureTrackedWindow() {
+        let pid = searchViewModel.hoveredAppPID
+        guard pid != 0 else {
+            taskIconWindowID = nil
+            taskIconWindowOffset = nil
+            return
+        }
+
+        let options: CGWindowListOption = [.optionOnScreenOnly, .excludeDesktopElements]
+        guard let windowList = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[CFString: Any]] else {
+            taskIconWindowID = nil
+            taskIconWindowOffset = nil
+            return
+        }
+
+        // Find the frontmost window belonging to the hovered app
+        let mouseLocation = NSEvent.mouseLocation
+        let screenHeight = NSScreen.main?.frame.height ?? 0
+
+        for windowInfo in windowList {
+            guard let ownerPID = windowInfo[kCGWindowOwnerPID] as? pid_t,
+                  ownerPID == pid,
+                  let windowID = windowInfo[kCGWindowNumber] as? CGWindowID,
+                  let boundsDict = windowInfo[kCGWindowBounds] as? [String: CGFloat],
+                  let wx = boundsDict["X"],
+                  let wy = boundsDict["Y"],
+                  let ww = boundsDict["Width"],
+                  let wh = boundsDict["Height"],
+                  ww > 0, wh > 0 else { continue }
+
+            // CGWindowList uses top-left origin; convert to bottom-left (AppKit)
+            let windowOrigin = CGPoint(x: wx, y: screenHeight - wy - wh)
+            let windowFrame = CGRect(origin: windowOrigin, size: CGSize(width: ww, height: wh))
+
+            // Check if mouse is within this window
+            if windowFrame.contains(mouseLocation) {
+                taskIconWindowID = windowID
+                taskIconWindowOffset = CGPoint(
+                    x: frame.origin.x - windowOrigin.x,
+                    y: frame.origin.y - windowOrigin.y
+                )
+                return
+            }
+        }
+
+        // No matching window found — stay fixed
+        taskIconWindowID = nil
+        taskIconWindowOffset = nil
+    }
+
+    private func startTaskIconFollowTimer() {
+        taskIconFollowTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
+            self?.updateTaskIconPosition()
+        }
+    }
+
+    private func updateTaskIconPosition() {
+        guard let windowID = taskIconWindowID, let offset = taskIconWindowOffset else { return }
+
+        let options: CGWindowListOption = [.optionIncludingWindow]
+        guard let windowList = CGWindowListCopyWindowInfo(options, windowID) as? [[CFString: Any]],
+              let windowInfo = windowList.first,
+              let boundsDict = windowInfo[kCGWindowBounds] as? [String: CGFloat],
+              let wx = boundsDict["X"],
+              let wy = boundsDict["Y"],
+              let wh = boundsDict["Height"] else {
+            // Window not found — keep icon at last position
+            return
+        }
+
+        let screenHeight = NSScreen.main?.frame.height ?? 0
+
+        // Check if window is on screen
+        let isOnScreen = windowInfo[kCGWindowIsOnscreen as CFString] as? Bool ?? true
+        if !isOnScreen {
+            if isVisible { orderOut(nil) }
+            return
+        } else {
+            if !isVisible { orderFront(nil) }
+        }
+
+        // Reposition icon relative to tracked window
+        let windowOrigin = CGPoint(x: wx, y: screenHeight - wy - wh)
+        let newAnchor = NSPoint(x: windowOrigin.x + offset.x, y: windowOrigin.y + offset.y)
+        taskIconAnchorOrigin = newAnchor
+        if !searchViewModel.isTaskIconHovered {
+            setFrameOrigin(newAnchor)
+        } else {
+            // When hovered/expanded, shift the expanded frame to track the window
+            expandTaskIconForHover()
+        }
+    }
+
+    private func handleTaskIconMouseMove() {
+        guard isTaskIconMode else { return }
+        let mouseLocation = NSEvent.mouseLocation
+        let cursorOver = isCursorOverPanel(mouseLocation)
+
+        if cursorOver && !searchViewModel.isTaskIconHovered {
+            searchViewModel.isTaskIconHovered = true
+            // Expand panel to fit status text
+            DispatchQueue.main.async { [weak self] in
+                self?.expandTaskIconForHover()
+            }
+        } else if !cursorOver && searchViewModel.isTaskIconHovered {
+            searchViewModel.isTaskIconHovered = false
+            // Shrink back to icon
+            collapseTaskIconFromHover()
+        }
+    }
+
+    private func expandTaskIconForHover() {
+        guard isTaskIconMode, searchViewModel.isTaskIconHovered,
+              let anchor = taskIconAnchorOrigin else { return }
+        let fittingSize = hostingView.fittingSize
+        let newWidth = max(fittingSize.width, 36)
+        let newHeight = max(fittingSize.height, 36)
+
+        // Determine expansion direction based on screen position
+        let screen = self.screen ?? NSScreen.main
+        let screenMidX = screen?.visibleFrame.midX ?? anchor.x
+
+        var newOrigin = anchor
+        if anchor.x + 18 > screenMidX {
+            // Closer to right edge — expand leftward (right edge stays at anchor right edge)
+            newOrigin.x = (anchor.x + 36) - newWidth
+        }
+        // Closer to left edge — expand rightward (left edge stays at anchor)
+        // Keep top edge aligned
+        newOrigin.y = (anchor.y + 36) - newHeight
+
+        setFrame(NSRect(origin: newOrigin, size: CGSize(width: newWidth, height: newHeight)), display: true)
+    }
+
+    private func collapseTaskIconFromHover() {
+        guard isTaskIconMode, let anchor = taskIconAnchorOrigin else { return }
+        let iconSize: CGFloat = 36
+        setFrame(NSRect(origin: anchor, size: CGSize(width: iconSize, height: iconSize)), display: true)
+    }
+
+    func transitionTaskIconToCommandMenu() {
+        stopTaskIconFollowTimer()
+        removeTaskIconMonitors()
+        orderOut(nil)
+        // Call callback before resetting state so it can detect task icon mode
+        onTransitionToCommandMenu?(self)
+        isTaskIconMode = false
+        searchViewModel.isTaskIconMode = false
+        searchViewModel.isTaskIconHovered = false
+    }
+
+    private func stopTaskIconFollowTimer() {
+        taskIconFollowTimer?.invalidate()
+        taskIconFollowTimer = nil
+    }
+
+    private func removeTaskIconMonitors() {
+        if let m = taskIconHoverMonitor { NSEvent.removeMonitor(m) }
+        if let m = taskIconLocalHoverMonitor { NSEvent.removeMonitor(m) }
+        taskIconHoverMonitor = nil
+        taskIconLocalHoverMonitor = nil
     }
 
     func reopenPersistentTaskWindow() {
@@ -1319,10 +1547,12 @@ class FloatingPanel: NSPanel {
         pinnedLocalMouseMonitor = nil
         cancelPendingDrag()
         cancelPinnedPauseTimer()
+        stopTaskIconFollowTimer()
+        removeTaskIconMonitors()
     }
 
     override func close() {
-        if preservesTaskHistory && isTerminalMode && !isDestroyingTaskWindow {
+        if preservesTaskHistory && (isTerminalMode || isTaskIconMode) && !isDestroyingTaskWindow {
             hidePersistentTaskWindow(restorePreviousFocus: shouldRestoreFocusOnClose)
             return
         }
@@ -1350,6 +1580,8 @@ class FloatingPanel: NSPanel {
         searchViewModel.isChatMode = false
         searchViewModel.isCommandKeyMode = false
         searchViewModel.isMinimalMode = false
+        searchViewModel.isTaskIconMode = false
+        searchViewModel.isTaskIconHovered = false
         searchViewModel.voiceState = .idle
         searchViewModel.voiceLevel = 0
         searchViewModel.chatHistory = []
@@ -1357,6 +1589,10 @@ class FloatingPanel: NSPanel {
         searchViewModel.currentSessionId = nil
         lastReportedContentSize = .zero
         isTerminalMode = false
+        isTaskIconMode = false
+        taskIconWindowID = nil
+        taskIconWindowOffset = nil
+        taskIconAnchorOrigin = nil
         isCommandKeyVisible = false
         isCursorFollowing = false
         invokeHoldBehavior = nil
@@ -1378,6 +1614,14 @@ class FloatingPanel: NSPanel {
     }
 
     // Handle Escape: stop streaming if active, otherwise close
+    override func mouseDown(with event: NSEvent) {
+        if isTaskIconMode {
+            transitionTaskIconToCommandMenu()
+            return
+        }
+        super.mouseDown(with: event)
+    }
+
     override func cancelOperation(_ sender: Any?) {
         if let manager = searchViewModel.claudeManager,
            manager.status.isActive {

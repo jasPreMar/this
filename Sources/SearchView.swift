@@ -4,6 +4,7 @@ struct SearchView: View {
     @ObservedObject var viewModel: SearchViewModel
     @State private var textHeight: CGFloat = 20
     @State private var textWidth: CGFloat = FocusedTextField.minWidth
+    @State private var taskIconPulse = false
 
     private var usesNativeGlassSurface: Bool {
         NativeGlass.isSupported
@@ -11,7 +12,11 @@ struct SearchView: View {
 
     var body: some View {
         if viewModel.isMinimalMode {
-            minimalIndicator
+            if viewModel.isTaskIconMode {
+                taskIconIndicator
+            } else {
+                minimalIndicator
+            }
         } else {
             fullPanel
         }
@@ -34,6 +39,51 @@ struct SearchView: View {
                         .scaledToFit()
                         .frame(width: 20, height: 20)
                         .clipShape(RoundedRectangle(cornerRadius: 4))
+                }
+            }
+            .padding(8)
+        }
+    }
+
+    private var thisAppIcon: NSImage? {
+        if let icon = Bundle.main.image(forResource: "AppIcon") { return icon }
+        let bundleName = "This_This"
+        if let url = Bundle.main.resourceURL?
+            .appendingPathComponent("\(bundleName).bundle")
+            .appendingPathComponent("AppIcon.icns"),
+           let icon = NSImage(contentsOf: url) { return icon }
+        if let url = Bundle.main.executableURL?.deletingLastPathComponent()
+            .appendingPathComponent("\(bundleName).bundle")
+            .appendingPathComponent("AppIcon.icns"),
+           let icon = NSImage(contentsOf: url) { return icon }
+        return NSApp.applicationIconImage
+    }
+
+    private var taskIconIndicator: some View {
+        PanelChrome(cornerRadius: 10, usesNativeGlassSurface: usesNativeGlassSurface) {
+            HStack(spacing: 6) {
+                if let appIcon = thisAppIcon {
+                    TimelineView(.animation(minimumInterval: 0.05, paused: !viewModel.isTaskRunning)) { timeline in
+                        let phase = viewModel.isTaskRunning
+                            ? 0.4 + 0.6 * (0.5 + 0.5 * sin(timeline.date.timeIntervalSinceReferenceDate * 2 * .pi / 2.0))
+                            : 1.0
+                        Image(nsImage: appIcon)
+                            .resizable()
+                            .interpolation(.high)
+                            .scaledToFit()
+                            .frame(width: 20, height: 20)
+                            .clipShape(RoundedRectangle(cornerRadius: 4))
+                            .opacity(phase)
+                    }
+                }
+
+                if viewModel.isTaskIconHovered {
+                    Text(viewModel.taskStatusSummary)
+                        .font(.system(size: 12))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .foregroundColor(.primary)
+                        .frame(maxWidth: 260, alignment: .leading)
                 }
             }
             .padding(8)

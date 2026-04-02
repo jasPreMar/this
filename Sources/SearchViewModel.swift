@@ -32,11 +32,13 @@ class SearchViewModel: ObservableObject {
     @Published var chatHistory: [ChatMessage] = []
     @Published var voiceState: VoiceState = .idle
     @Published var voiceLevel: CGFloat = 0
+    @Published var isTaskIconMode = false
+    @Published var isTaskIconHovered = false
     var currentSessionId: String?
     var currentSessionWorkingDirectoryURL: URL?
     var onContentSizeChange: ((CGSize) -> Void)?
     var onClaudeManagerChange: ((ClaudeProcessManager?) -> Void)?
-    private var hoveredAppPID: pid_t = 0
+    private(set) var hoveredAppPID: pid_t = 0
 
     // Stale accessibility tree detection
     private var lastCursorPosition: CGPoint = .zero
@@ -59,6 +61,50 @@ class SearchViewModel: ObservableObject {
             return false
         case .listening, .transcribing, .failed:
             return true
+        }
+    }
+
+    var taskStatusSummary: String {
+        guard let manager = claudeManager else { return "Done" }
+        switch manager.status {
+        case .routing, .waiting:
+            return "Starting..."
+        case .streaming:
+            if let toolName = manager.activeToolName {
+                return "Running \(toolName)"
+            }
+            if let lastEvent = manager.events.last {
+                switch lastEvent {
+                case .thinking:
+                    return "Thinking..."
+                case .text(_, let text):
+                    let firstLine = text.components(separatedBy: .newlines).first(where: { !$0.isEmpty }) ?? ""
+                    return firstLine.isEmpty ? "Responding..." : firstLine
+                case .toolCall(_, let name, _):
+                    return "Running \(name)"
+                }
+            }
+            return "Thinking..."
+        case .done:
+            if let lastAssistant = chatHistory.last(where: { $0.role == "assistant" }) {
+                let text = lastAssistant.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                if let firstLine = text.components(separatedBy: .newlines).first(where: { !$0.isEmpty }), !firstLine.isEmpty {
+                    return firstLine
+                }
+            }
+            return "Done"
+        case .error(let msg):
+            return "Error: \(msg)"
+        }
+    }
+
+    var isTaskRunning: Bool {
+        guard let manager = claudeManager else { return false }
+        switch manager.status {
+        case .routing, .waiting, .streaming:
+            return true
+        case .done, .error:
+            return false
         }
     }
 

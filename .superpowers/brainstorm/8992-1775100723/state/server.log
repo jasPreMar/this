@@ -1,0 +1,6 @@
+{"type":"server-started","port":52374,"host":"127.0.0.1","url_host":"localhost","url":"http://localhost:52374","screen_dir":"/Users/jasonmarsh/conductor/workspaces/hyper-pointer/lisbon-v2/.superpowers/brainstorm/8992-1775100723/content","state_dir":"/Users/jasonmarsh/conductor/workspaces/hyper-pointer/lisbon-v2/.superpowers/brainstorm/8992-1775100723/state"}
+{"type":"screen-added","file":"/Users/jasonmarsh/conductor/workspaces/hyper-pointer/lisbon-v2/.superpowers/brainstorm/8992-1775100723/content/positioning.html"}
+{"type":"screen-added","file":"/Users/jasonmarsh/conductor/workspaces/hyper-pointer/lisbon-v2/.superpowers/brainstorm/8992-1775100723/content/waiting.html"}
+{"type":"screen-added","file":"/Users/jasonmarsh/conductor/workspaces/hyper-pointer/lisbon-v2/.superpowers/brainstorm/8992-1775100723/content/design-overview.html"}
+{"type":"screen-added","file":"/Users/jasonmarsh/conductor/workspaces/hyper-pointer/lisbon-v2/.superpowers/brainstorm/8992-1775100723/content/waiting-2.html"}
+{"type":"server-stopped","reason":"owner process exited"}
