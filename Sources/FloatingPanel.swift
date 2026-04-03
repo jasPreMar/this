@@ -249,6 +249,21 @@ class FloatingPanel: NSPanel {
                 }
             }
             .store(in: &cancellables)
+
+        NotificationCenter.default
+            .publisher(for: UserDefaults.didChangeNotification)
+            .compactMap { _ -> Bool? in AppSettings.highlightOverlayEnabled }
+            .removeDuplicates()
+            .receive(on: RunLoop.main)
+            .sink { [weak self] enabled in
+                guard let self else { return }
+                if enabled, self.isVisible {
+                    self.highlightOverlayStore?.update(frame: self.searchViewModel.hoveredElementFrame)
+                } else if !enabled {
+                    self.highlightOverlayStore?.clear()
+                }
+            }
+            .store(in: &cancellables)
     }
 
     private func installFloatingSurface() {

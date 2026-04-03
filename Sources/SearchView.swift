@@ -218,7 +218,7 @@ struct PanelHeaderSection<Accessory: View>: View {
                 .background(Color.accentColor.opacity(0.08))
             }
 
-            if AppSettings.objectTextEnabled {
+            if viewModel.objectTextEnabled {
                 if !viewModel.selectedText.isEmpty, viewModel.hoveredParts.last != nil {
                     Divider()
                         .padding(.horizontal, 8)
@@ -243,7 +243,7 @@ struct PanelHeaderSection<Accessory: View>: View {
                 }
             }
 
-            if viewModel.isVoiceModeActive, (!AppSettings.objectTextEnabled || viewModel.hoveredParts.last == nil) {
+            if viewModel.isVoiceModeActive, (!viewModel.objectTextEnabled || viewModel.hoveredParts.last == nil) {
                 HStack(spacing: 8) {
                     Image(systemName: "mic.fill")
                         .font(.system(size: 11))
@@ -691,6 +691,6 @@ struct CompactVoiceWaveformView: View {
 
 private extension SearchViewModel {
     var hasPanelHeaderContent: Bool {
-        !selectedText.isEmpty || (AppSettings.objectTextEnabled && hoveredParts.last != nil) || isVoiceModeActive
+        !selectedText.isEmpty || (objectTextEnabled && hoveredParts.last != nil) || isVoiceModeActive
     }
 }
