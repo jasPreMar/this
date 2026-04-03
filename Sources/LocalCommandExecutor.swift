@@ -7,6 +7,7 @@ struct LocalExecutionResult {
     let eventInput: String
     let ghostCursorIntent: GhostCursorIntent?
     let resultingInvocationSnapshot: ExternalFocusSnapshot?
+    let completionAction: CommandMenuCompletionAction
 }
 
 struct LocalExecutionContext {
@@ -91,7 +92,8 @@ final class LocalCommandExecutor {
                     status: "completed"
                 ),
                 ghostCursorIntent: intent,
-                resultingInvocationSnapshot: snapshot(for: resolution)
+                resultingInvocationSnapshot: snapshot(for: resolution),
+                completionAction: .preserve
             )
         )
     }
@@ -146,7 +148,8 @@ final class LocalCommandExecutor {
                     status: "completed"
                 ),
                 ghostCursorIntent: .focusWindow(label: text.replacingOccurrences(of: ".", with: "")),
-                resultingInvocationSnapshot: snapshot(for: resolution)
+                resultingInvocationSnapshot: snapshot(for: resolution),
+                completionAction: .preserve
             )
         )
     }
@@ -195,7 +198,8 @@ final class LocalCommandExecutor {
                     path: url.path,
                     query: url.lastPathComponent
                 ),
-                resultingInvocationSnapshot: ExternalFocusInspector.captureCurrent()
+                resultingInvocationSnapshot: ExternalFocusInspector.captureCurrent(),
+                completionAction: .preserve
             )
         )
     }

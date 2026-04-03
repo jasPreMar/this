@@ -274,6 +274,23 @@ func testFastCommandRouter() {
     assert(commandMenuCopySeed == .fallback(.noSubject), "routerCommandMenuCopySeedFallsBack")
 }
 
+// ─── Panel Invocation Tests ────────────────────────────────────────
+
+func testPanelInvocationPolicy() {
+    assert(
+        shouldResumeSelectedPanelOnInvoke(isChatMode: true, isTaskIconMode: false) == true,
+        "resumesVisibleChatPanel"
+    )
+    assert(
+        shouldResumeSelectedPanelOnInvoke(isChatMode: true, isTaskIconMode: true) == false,
+        "doesNotResumeTaskIconPanel"
+    )
+    assert(
+        shouldResumeSelectedPanelOnInvoke(isChatMode: false, isTaskIconMode: false) == false,
+        "doesNotResumeSearchPanel"
+    )
+}
+
 // ─── Assistant Response Directive Tests ─────────────────────────────
 
 func testAssistantResponseDirectives() {
@@ -385,6 +402,39 @@ func testAssistantResponseDirectives() {
         isCommandMenuVisible: false,
         isCommandMenuDismissing: false
     ), "revealPolicyHonorsPreserve")
+
+    assert(!shouldMarkCompletedTaskUnread(
+        completionAction: .preserve,
+        isTaskVisibleToUser: false
+    ), "preserveCompletionDoesNotCreateUnreadTask")
+
+    assert(shouldMarkCompletedTaskUnread(
+        completionAction: .reveal,
+        isTaskVisibleToUser: false
+    ), "revealCompletionMarksHiddenTaskUnread")
+
+    assert(shouldAutoDismissFloatingPanelOnCompletion(
+        completionAction: .preserve,
+        isTaskIconMode: true
+    ), "preserveCompletionDismissesTaskIcon")
+
+    assert(!shouldAutoDismissFloatingPanelOnCompletion(
+        completionAction: .reveal,
+        isTaskIconMode: true
+    ), "revealCompletionKeepsTaskIconVisible")
+
+    assert(!shouldAutoDismissFloatingPanelOnCompletion(
+        completionAction: .preserve,
+        isTaskIconMode: false
+    ), "preserveCompletionOnlyDismissesTaskIconMode")
+
+    assert(shouldMarkTaskEligibleForClosedCommandMenuReveal(
+        isCommandMenuVisible: false
+    ), "hiddenCommandMenuMarksTaskEligibleForReveal")
+
+    assert(!shouldMarkTaskEligibleForClosedCommandMenuReveal(
+        isCommandMenuVisible: true
+    ), "visibleCommandMenuDoesNotMarkTaskEligibleForReveal")
 }
 
 // ─── Entry Point ─────────────────────────────────────────────────────
@@ -403,6 +453,7 @@ struct RegressionTests {
         testRoleSets()
         testElectronGroupDrilling()
         testFastCommandRouter()
+        testPanelInvocationPolicy()
         testAssistantResponseDirectives()
 
         output("")

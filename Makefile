@@ -2,6 +2,7 @@ BINARY    := .build/debug/This
 BUNDLE_ID := do.this.app
 USER_TCC  := $(HOME)/Library/Application Support/com.apple.TCC/TCC.db
 APP_PATH  := dist/This.app
+DEBUG_APP_DIR := dist/debug
 DMG_PATH  := dist/This.dmg
 
 .PHONY: build test run sign app install dmg grant reset-tcc cert-instructions
@@ -23,8 +24,8 @@ sign:
 		echo "Signed with '$$IDENTITY'."; \
 	fi
 
-run: build
-	"$(BINARY)"
+run:
+	./scripts/build-app.sh --configuration debug --output-dir "$(DEBUG_APP_DIR)" --run
 
 app:
 	./scripts/build-app.sh

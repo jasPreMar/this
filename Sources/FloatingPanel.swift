@@ -50,6 +50,7 @@ class FloatingPanel: NSPanel {
     private var taskIconFollowTimer: Timer?
     private var taskIconHoverMonitor: Any?
     private var taskIconLocalHoverMonitor: Any?
+    private var taskIconAutoCollapseTimer: Timer?
     private var cancellables = Set<AnyCancellable>()
     private(set) var taskStartedAt: Date?
     private(set) var taskCompletedAt: Date?
@@ -754,10 +755,10 @@ class FloatingPanel: NSPanel {
         searchViewModel.isTaskIconMode = true
 
         let iconSize: CGFloat = 36
-        let anchorTop = frame.maxY
+        let cursorLocation = NSEvent.mouseLocation
         let iconOrigin = NSPoint(
-            x: frame.minX,
-            y: anchorTop - iconSize
+            x: cursorLocation.x - iconSize / 2,
+            y: cursorLocation.y - iconSize / 2
         )
         taskIconAnchorOrigin = iconOrigin
 
@@ -925,9 +926,34 @@ class FloatingPanel: NSPanel {
         setFrame(NSRect(origin: anchor, size: CGSize(width: iconSize, height: iconSize)), display: true)
     }
 
+    /// Briefly expand the icon to show status, then auto-collapse after a delay.
+    private func brieflyExpandTaskIcon(collapseAfter delay: TimeInterval = 3.0) {
+        guard isTaskIconMode, !searchViewModel.isTaskIconHovered else { return }
+
+        taskIconAutoCollapseTimer?.invalidate()
+
+        // Temporarily set hovered so the expand logic works and status text shows
+        searchViewModel.isTaskIconHovered = true
+        DispatchQueue.main.async { [weak self] in
+            self?.expandTaskIconForHover()
+        }
+
+        taskIconAutoCollapseTimer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
+            guard let self, self.isTaskIconMode else { return }
+            // Only collapse if the user isn't actually hovering
+            let mouseLocation = NSEvent.mouseLocation
+            if !self.isCursorOverPanel(mouseLocation) {
+                self.searchViewModel.isTaskIconHovered = false
+                self.collapseTaskIconFromHover()
+            }
+        }
+    }
+
     func transitionTaskIconToCommandMenu() {
         stopTaskIconFollowTimer()
         removeTaskIconMonitors()
+        taskIconAutoCollapseTimer?.invalidate()
+        taskIconAutoCollapseTimer = nil
         orderOut(nil)
         // Call callback before resetting state so it can detect task icon mode
         onTransitionToCommandMenu?(self)
@@ -954,6 +980,15 @@ class FloatingPanel: NSPanel {
         makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
         notifyTaskStateChanged()
+    }
+
+    func dismissCompletedTaskIconIfNeeded() {
+        guard shouldAutoDismissFloatingPanelOnCompletion(
+            completionAction: lastCompletedCommandMenuAction,
+            isTaskIconMode: isTaskIconMode
+        ) else { return }
+
+        dismiss(restorePreviousFocus: false)
     }
 
     func destroyPersistentTaskWindow() {
@@ -1064,12 +1099,14 @@ class FloatingPanel: NSPanel {
             taskCompletedAt = nil
             taskLastActivityAt = Date()
             onStreamingBegan?()
+            if isTaskIconMode { brieflyExpandTaskIcon() }
         case .done, .error:
             lastCompletedCommandMenuAction = searchViewModel.claudeManager?.completionAction ?? .reveal
             let now = Date()
             taskCompletedAt = now
             taskLastActivityAt = now
             saveChatSession()
+            if isTaskIconMode { brieflyExpandTaskIcon() }
         }
 
         notifyTaskStateChanged()
