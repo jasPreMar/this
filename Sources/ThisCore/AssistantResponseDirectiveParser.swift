@@ -31,6 +31,27 @@ public func shouldRevealCommandMenuOnCompletion(
     return !isCommandMenuVisible || isCommandMenuDismissing
 }
 
+public func shouldMarkCompletedTaskUnread(
+    completionAction: CommandMenuCompletionAction,
+    isTaskVisibleToUser: Bool
+) -> Bool {
+    guard completionAction != .preserve else { return false }
+    return !isTaskVisibleToUser
+}
+
+public func shouldAutoDismissFloatingPanelOnCompletion(
+    completionAction: CommandMenuCompletionAction,
+    isTaskIconMode: Bool
+) -> Bool {
+    isTaskIconMode && completionAction == .preserve
+}
+
+public func shouldMarkTaskEligibleForClosedCommandMenuReveal(
+    isCommandMenuVisible: Bool
+) -> Bool {
+    !isCommandMenuVisible
+}
+
 public enum AssistantResponseDirectiveParser {
     private static let plainTextDirectivePrefix = "[[HP_COMMAND_MENU:"
     private static let plainTextDirectiveSuffix = "]]"

@@ -94,6 +94,7 @@ class ClaudeProcessManager: ObservableObject {
         }
         events = [.toolCall(id: UUID().uuidString, name: "quick_action", input: result.eventInput)]
         outputText = result.assistantText
+        completionAction = result.completionAction
         status = .done
         onComplete?(result.assistantText)
     }
@@ -427,6 +428,20 @@ class ClaudeProcessManager: ObservableObject {
 
     private var accumulated = ""
 
+    @discardableResult
+    func applyAssistantResponseText(_ text: String) -> String {
+        let parsed = AssistantResponseDirectiveParser.parse(text)
+        accumulated = parsed.sanitizedText
+        completionAction = parsed.completionAction
+        if AppSettings.structuredUIEnabled {
+            let structuredUI = Self.decodeStructuredUI(from: parsed.sanitizedText)
+            DispatchQueue.main.async {
+                self.structuredUIResponse = structuredUI
+            }
+        }
+        return accumulated
+    }
+
     private func extractText(from jsonLine: String) -> String? {
         guard let data = jsonLine.data(using: .utf8),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -447,16 +462,7 @@ class ClaudeProcessManager: ObservableObject {
             if let sid = json["session_id"] as? String {
                 DispatchQueue.main.async { self.sessionId = sid }
             }
-            let parsed = AssistantResponseDirectiveParser.parse(result)
-            accumulated = parsed.sanitizedText
-            completionAction = parsed.completionAction
-            if AppSettings.structuredUIEnabled {
-                let structuredUI = Self.decodeStructuredUI(from: parsed.sanitizedText)
-                DispatchQueue.main.async {
-                    self.structuredUIResponse = structuredUI
-                }
-            }
-            return accumulated
+            return applyAssistantResponseText(result)
         }
 
         // CLI format: assistant messages contain complete content arrays
@@ -490,14 +496,7 @@ class ClaudeProcessManager: ObservableObject {
                     }
                 } else if blockType == "text",
                           let text = block["text"] as? String {
-                    let parsed = AssistantResponseDirectiveParser.parse(text)
-                    accumulated = parsed.sanitizedText
-                    if AppSettings.structuredUIEnabled {
-                        let structuredUI = Self.decodeStructuredUI(from: parsed.sanitizedText)
-                        DispatchQueue.main.async {
-                            self.structuredUIResponse = structuredUI
-                        }
-                    }
+                    applyAssistantResponseText(text)
                 }
             }
             // Return accumulated text so intermediate responses are visible

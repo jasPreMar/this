@@ -251,5 +251,5 @@ if [[ "$RUN_AFTER_BUILD" -eq 1 ]]; then
   if [[ "$INSTALL_AFTER_BUILD" -eq 1 ]]; then
     RUN_PATH="$TARGET_PATH"
   fi
-  open -na "$RUN_PATH"
+  open -na "$(cd "$(dirname "$RUN_PATH")" && pwd)/$(basename "$RUN_PATH")"
 fi

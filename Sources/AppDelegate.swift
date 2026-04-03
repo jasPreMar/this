@@ -283,7 +283,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             let isDoubleTap = (now - lastInvokeKeyReleaseTime) < Self.doubleTapInterval
 
             if let selectedPanel = selectedVisiblePanel(),
-               selectedPanel.searchViewModel.isChatMode {
+               shouldResumeSelectedPanelOnInvoke(
+                   isChatMode: selectedPanel.searchViewModel.isChatMode,
+                   isTaskIconMode: selectedPanel.searchViewModel.isTaskIconMode
+               ) {
                 commandKeyPanel = selectedPanel
                 selectedPanel.isCommandKeyHeld = true
                 selectedPanel.startAnchoredVoiceMode(with: modifierFlags)
@@ -1086,12 +1089,18 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             guard let self, let panel else { return }
             self.ghostCursorStore.setTaskVisible(panel.taskId, visible: false)
             self.handleCompletedTaskVisibilityIfNeeded(for: panel)
+            panel.dismissCompletedTaskIconIfNeeded()
         }
         panel.onPersistentTaskStarted = { [weak self, weak panel] _ in
             guard let self, let panel else { return }
             self.registerTaskRecord(for: panel)
             self.ghostCursorStore.registerTask(panel.taskId, anchorPoint: panel.ghostCursorAnchorPoint)
             self.ghostCursorStore.setTaskVisible(panel.taskId, visible: false)
+            if shouldMarkTaskEligibleForClosedCommandMenuReveal(
+                isCommandMenuVisible: self.commandMenuPanel?.isVisible == true
+            ) {
+                self.markPanelEligibleForClosedCommandMenuReveal(panel)
+            }
         }
         panel.onTaskStateChanged = { [weak self, weak panel] _ in
             guard let self, let panel else { return }
@@ -1191,6 +1200,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
 
     func openTaskRecord(_ record: TaskSessionRecord) {
         record.isUnread = false
+        // Dismiss the floating icon if this task's panel is in icon mode
+        if let panel = record.panel, panel.searchViewModel.isTaskIconMode {
+            panel.transitionTaskIconToCommandMenu()
+        }
         ensureTaskHasLivePanel(record)
         setCommandMenuChatRecord(record)
     }
@@ -1228,6 +1241,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     }
 
     func closeCommandMenu() {
+        if let runningPanel = commandMenuChatRecord?.panel,
+           commandMenuChatRecord?.isRunning == true,
+           shouldMarkTaskEligibleForClosedCommandMenuReveal(
+               isCommandMenuVisible: false
+           ) {
+            markPanelEligibleForClosedCommandMenuReveal(runningPanel)
+        }
         if let commandMenuChatRecord {
             rememberedCommandMenuChatRecordID = commandMenuChatRecord.id
         }
@@ -1376,7 +1396,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             record.isUnread = false
             showCommandMenu(from: .invokeHotKey, navigateToChat: record)
         } else {
-            record.isUnread = !isTaskCurrentlyVisibleToUser(record)
+            record.isUnread = shouldMarkCompletedTaskUnread(
+                completionAction: panel.lastCompletedCommandMenuAction,
+                isTaskVisibleToUser: isTaskCurrentlyVisibleToUser(record)
+            )
             objectWillChange.send()
         }
     }
