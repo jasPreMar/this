@@ -157,6 +157,7 @@ private struct GeneralSettingsPane: View {
             VStack(spacing: 14) {
                 invokeHotkeyCard
                 soundEffectsCard
+                pointerOverlayCard
                 ghostCursorCard
                 autoVoiceCard
             }
@@ -228,6 +229,46 @@ private struct GeneralSettingsPane: View {
                 Toggle("", isOn: $settingsStore.autoVoiceEnabled)
                     .toggleStyle(.switch)
                     .labelsHidden()
+            }
+        }
+    }
+
+    private var pointerOverlayCard: some View {
+        SettingsCard {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack(alignment: .center, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Object detection highlight")
+                            .font(.system(size: 15, weight: .semibold))
+                        Text("Show a blue highlight around the UI element under your pointer.")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Spacer()
+
+                    Toggle("", isOn: $settingsStore.highlightOverlayEnabled)
+                        .toggleStyle(.switch)
+                        .labelsHidden()
+                }
+
+                Divider()
+
+                HStack(spacing: 16) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Object text")
+                            .font(.system(size: 13, weight: .semibold))
+                        Text("Show what you're pointing at in the floating panel.")
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Spacer()
+
+                    Toggle("", isOn: $settingsStore.objectTextEnabled)
+                        .toggleStyle(.switch)
+                        .labelsHidden()
+                }
             }
         }
     }

@@ -242,7 +242,7 @@ class FloatingPanel: NSPanel {
         searchViewModel.$hoveredElementFrame
             .sink { [weak self] frame in
                 guard let self else { return }
-                if self.isVisible {
+                if self.isVisible, AppSettings.highlightOverlayEnabled {
                     self.highlightOverlayStore?.update(frame: frame)
                 } else {
                     self.highlightOverlayStore?.clear()
