@@ -242,9 +242,24 @@ class FloatingPanel: NSPanel {
         searchViewModel.$hoveredElementFrame
             .sink { [weak self] frame in
                 guard let self else { return }
-                if self.isVisible {
+                if self.isVisible, AppSettings.highlightOverlayEnabled {
                     self.highlightOverlayStore?.update(frame: frame)
                 } else {
+                    self.highlightOverlayStore?.clear()
+                }
+            }
+            .store(in: &cancellables)
+
+        NotificationCenter.default
+            .publisher(for: UserDefaults.didChangeNotification)
+            .compactMap { _ -> Bool? in AppSettings.highlightOverlayEnabled }
+            .removeDuplicates()
+            .receive(on: RunLoop.main)
+            .sink { [weak self] enabled in
+                guard let self else { return }
+                if enabled, self.isVisible {
+                    self.highlightOverlayStore?.update(frame: self.searchViewModel.hoveredElementFrame)
+                } else if !enabled {
                     self.highlightOverlayStore?.clear()
                 }
             }

@@ -32,6 +32,8 @@ enum AppSettings {
         static let ghostCursorClickSoundEnabled = "ghostCursorClickSoundEnabled"
         static let ghostCursorDebugLabelsEnabled = "ghostCursorDebugLabelsEnabled"
         static let structuredUIEnabled = "structuredUIEnabled"
+        static let highlightOverlayEnabled = "highlightOverlayEnabled"
+        static let objectTextEnabled = "objectTextEnabled"
         static let hoverLoggingEnabled = "hoverLoggingEnabled"
         static let hoverLoggingDwellDelay = "hoverLoggingDwellDelay"
     }
@@ -48,6 +50,8 @@ enum AppSettings {
             Keys.ghostCursorClickSoundEnabled: false,
             Keys.ghostCursorDebugLabelsEnabled: false,
             Keys.structuredUIEnabled: false,
+            Keys.highlightOverlayEnabled: false,
+            Keys.objectTextEnabled: true,
             Keys.hoverLoggingEnabled: true,
             Keys.hoverLoggingDwellDelay: 0.25,
         ])
@@ -114,6 +118,16 @@ enum AppSettings {
     static var structuredUIEnabled: Bool {
         get { UserDefaults.standard.bool(forKey: Keys.structuredUIEnabled) }
         set { UserDefaults.standard.set(newValue, forKey: Keys.structuredUIEnabled) }
+    }
+
+    static var highlightOverlayEnabled: Bool {
+        get { UserDefaults.standard.bool(forKey: Keys.highlightOverlayEnabled) }
+        set { UserDefaults.standard.set(newValue, forKey: Keys.highlightOverlayEnabled) }
+    }
+
+    static var objectTextEnabled: Bool {
+        get { UserDefaults.standard.bool(forKey: Keys.objectTextEnabled) }
+        set { UserDefaults.standard.set(newValue, forKey: Keys.objectTextEnabled) }
     }
 
     static var hoverLoggingEnabled: Bool {
@@ -184,6 +198,12 @@ final class AppSettingsStore: ObservableObject {
     @Published var structuredUIEnabled: Bool {
         didSet { AppSettings.structuredUIEnabled = structuredUIEnabled }
     }
+    @Published var highlightOverlayEnabled: Bool {
+        didSet { AppSettings.highlightOverlayEnabled = highlightOverlayEnabled }
+    }
+    @Published var objectTextEnabled: Bool {
+        didSet { AppSettings.objectTextEnabled = objectTextEnabled }
+    }
 
     init() {
         AppSettings.registerDefaults()
@@ -198,5 +218,7 @@ final class AppSettingsStore: ObservableObject {
         ghostCursorClickSoundEnabled = AppSettings.ghostCursorClickSoundEnabled
         ghostCursorDebugLabelsEnabled = AppSettings.ghostCursorDebugLabelsEnabled
         structuredUIEnabled = AppSettings.structuredUIEnabled
+        highlightOverlayEnabled = AppSettings.highlightOverlayEnabled
+        objectTextEnabled = AppSettings.objectTextEnabled
     }
 }

@@ -34,6 +34,8 @@ class SearchViewModel: ObservableObject {
     @Published var voiceLevel: CGFloat = 0
     @Published var isTaskIconMode = false
     @Published var isTaskIconHovered = false
+    @Published var objectTextEnabled: Bool = AppSettings.objectTextEnabled
+    private var objectTextObserver: AnyCancellable?
     var currentSessionId: String?
     var currentSessionWorkingDirectoryURL: URL?
     var onContentSizeChange: ((CGSize) -> Void)?
@@ -54,6 +56,17 @@ class SearchViewModel: ObservableObject {
     var onQuickActionSubmit: ((String, URL?) -> Bool)?
     var hasStartedClaudeConversation = false
     var allowsDeicticFileTarget = false
+
+    init() {
+        objectTextObserver = NotificationCenter.default
+            .publisher(for: UserDefaults.didChangeNotification)
+            .compactMap { _ in AppSettings.objectTextEnabled }
+            .removeDuplicates()
+            .receive(on: RunLoop.main)
+            .sink { [weak self] enabled in
+                self?.objectTextEnabled = enabled
+            }
+    }
 
     var isVoiceModeActive: Bool {
         switch voiceState {

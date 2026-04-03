@@ -218,28 +218,32 @@ struct PanelHeaderSection<Accessory: View>: View {
                 .background(Color.accentColor.opacity(0.08))
             }
 
-            if !viewModel.selectedText.isEmpty, viewModel.hoveredParts.last != nil {
-                Divider()
-                    .padding(.horizontal, 8)
+            if viewModel.objectTextEnabled {
+                if !viewModel.selectedText.isEmpty, viewModel.hoveredParts.last != nil {
+                    Divider()
+                        .padding(.horizontal, 8)
+                }
+
+                if let visiblePart = viewModel.hoveredParts.last {
+                    HStack(spacing: 8) {
+                        ContextSummaryView(
+                            text: visiblePart,
+                            appIcon: viewModel.hoveredContextIcon,
+                            contextText: viewModel.hoveredParts.first,
+                            voiceState: viewModel.voiceState,
+                            voiceLevel: viewModel.voiceLevel,
+                            showsCloseButtonOnHover: showsCloseButtonOnHover,
+                            onClose: onClose
+                        )
+                        accessory
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 8)
+                }
             }
 
-            if let visiblePart = viewModel.hoveredParts.last {
-                HStack(spacing: 8) {
-                    ContextSummaryView(
-                        text: visiblePart,
-                        appIcon: viewModel.hoveredContextIcon,
-                        contextText: viewModel.hoveredParts.first,
-                        voiceState: viewModel.voiceState,
-                        voiceLevel: viewModel.voiceLevel,
-                        showsCloseButtonOnHover: showsCloseButtonOnHover,
-                        onClose: onClose
-                    )
-                    accessory
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 8)
-            } else if viewModel.isVoiceModeActive {
+            if viewModel.isVoiceModeActive, (!viewModel.objectTextEnabled || viewModel.hoveredParts.last == nil) {
                 HStack(spacing: 8) {
                     Image(systemName: "mic.fill")
                         .font(.system(size: 11))
@@ -687,6 +691,6 @@ struct CompactVoiceWaveformView: View {
 
 private extension SearchViewModel {
     var hasPanelHeaderContent: Bool {
-        !selectedText.isEmpty || hoveredParts.last != nil || isVoiceModeActive
+        !selectedText.isEmpty || (objectTextEnabled && hoveredParts.last != nil) || isVoiceModeActive
     }
 }
