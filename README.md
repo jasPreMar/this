@@ -1,177 +1,221 @@
 # This
 
-## Problem
+`This` is a cursor-aware macOS assistant. It lets you point at something on screen, hold a key, and turn that object into the start of a task.
 
-### Argument #1 - Pointing & Specifity
+The current app is no longer just a small floating chat bubble. It now has three working surfaces:
 
-Language is more ergonomic than any computer interface. By teaching computers language, we've gotten more ergonomic computers. But it can feel cumberson. Typing is prone to typos. Takes coordination.
+- a cursor-following panel for object-first tasks
+- a global command menu for launching and revisiting work
+- persistent task icons and chats for long-running jobs
 
-Spoken language is more ergonomic than written language. We learn to speak years before we learn to write or type. Speaking is easier, more natural, and more freeing. We can do other things while we speak. But we lose a lot of specificity.
+Under the hood, `This` reads UI context from macOS Accessibility APIs, captures screenshots when needed, tries fast deterministic actions locally, and falls back to Claude CLI when the task needs full agent behavior.
 
-But long before we ever utter a word, we look at things, point at things, and demand things. That loop: Look, point, and demand. We can do most of this in our GUIs. We have objects. We have a pointer. And we have a way to demand... *click click*.
+## Why It Exists
 
-When we speak, why not use out freed up digits to point, and make that visible to the LLM? My hypothesis is that these two forms of communication, done at the exact same time, will result in an extremely fluid and highly controllable interface.
+Most AI desktop tools still make you restate context the computer can already see.
 
-### Argument #2 - Objets & Orientation
+`This` starts from what you are already looking at:
 
-Classic command line interfaces had two big problems: Memorization and imagination. 
+- the app under your pointer
+- the specific UI element under your pointer
+- selected text
+- file and folder context when available
+- the current browser URL when available
+- a screenshot of the relevant screen or window
 
-**Memorization:**
-We had to memorize the syntax for every operation. If you get it wrong, you get an error. 
+That makes the prompt shorter and the control surface tighter. You point first, then ask.
 
-**Imagination:**
-And we had to imagine what's possible rather than discover it. We had to hold what was possible in our head before feeling confident enough to try it.
+## What The App Does Now
 
-GUIs solved both. Objects can easily be depicted with metaphors: folders, files, and icons scattered across on a desk. An object then only has a limited number of possible commands that followed. With text, you can cut, copy, and paste, not open or trash. With folders, you can open, duplicate, or rename, not run or refresh. Going object-first made possibilities discoverable.
+### 1. Cursor panel
 
-As GUIs become ubiquitous, they also became more complex and speciated. You had to learn to use software to get more and more things done, which can be exausting (not to mention, expensive).
+Hold your configured invoke key and a small panel appears next to your pointer. It tracks the object under the cursor, can show a live highlight around the detected element, and can anchor in place when you release the key so you can type.
 
-So now we have AI. It can use GUIs so we don't have to learn it. It can interpret what we're saying, so we don't have to memorize anything. But the problem of imagination remains. Beacuse we're back to the command-line, we're limited by ability to imagine what's possible.
+### 2. Voice-first invocation
 
-This is wby I believe objects should come back into play. By orienting an agent in an object, we collapse the space of possible actions. It's less cognitively demanding.
+If Auto-voice is enabled, voice capture starts as soon as you hold the invoke key. If Auto-voice is off, hold `Shift` while invoking to speak instead of typing. The dictated transcript is submitted directly into the same task flow.
 
----
+### 3. Global command menu
 
-## Introducing This
+Press your invoke key plus `Space` to open a full command menu. It acts as a launcher, task inbox, and task switcher for ongoing chats. You can pin it, keep multiple tasks alive, and reopen work without hunting for the original floating panel.
 
-This lets you launch an agent from any object. Objects are anything you point at. You can already point at a file left click to select it. You can double click to open it. You can right click to see a menu of other possible actions, like rename. But now, with This, you can point at it, and with your voice, tell it to open, select all contents, copy those contents, and move them to another folder in another part of your drive and duplicated with a slightly different scheme based on that folder's name. You can point at your browser and tell it what website to go to, what to do when you get there, to copy the contents, and bring it back to this other notes application and based the results.
+### 4. Fast local actions before Claude
 
-If your cursor is an arrow, clicking is a spear, and This is a long bow. Or better yet, This turns your arrow into a fully autonomous drone capable of entire chains of action, and returns to you when it's done.
+For simple requests, `This` does not always need to launch Claude first. It can route certain commands through a fast local path, including:
 
-If This is done well, we shouldn't need context menus (right click menus) anymore — except in the case of generated contextual ones that aid the user's need to choose an action. In fact, I'd argue that we don't need static menus at all anymore. You can start from an objecct and ask for anything you want, in plain language, and the system figures out how to do it.
+- open, focus, hide, or quit an app
+- focus, minimize, maximize, or close a window
+- open, reveal, or copy the path of a hovered file or folder
 
----
+If the request is ambiguous, multi-step, or needs reasoning, it falls back to Claude with the full captured context.
 
-## How This works
+### 5. Persistent tasks and task icons
 
-Normally, using an AI assistant goes like this:
+Long-running tasks can collapse into a minimal task icon that follows the source window. You can reopen the full chat from the command menu, keep multiple tasks running, and preserve history across task views.
 
-1. See something on screen
-2. Switch to a chat window
-3. Type: *"I'm in VS Code, looking at a red error in the Problems panel that says 'Cannot find module'..."*
-4. Ask your question
+### 6. Visual feedback
 
-You spend half your effort just describing the context before you can even ask the question.
+The app can show:
 
-This removes that step:
+- object detection highlight overlays
+- object text inside the panel
+- a ghost cursor that mirrors the agent's attention while a task is running
+- optional click sounds and debug labels for ghost cursor behavior
 
-1. **Press `Ctrl+Space`** (or hold `⌘` and move your mouse, or `Cmd+right-click`)
-2. **A floating panel appears** next to your cursor, above every other window
-3. **The app reads what's under your cursor** using macOS's Accessibility API — the same system screen readers use. It sees the app name, the UI element you're hovering (e.g. `button: Submit` or `text: Cannot find module`), any selected text, and the current URL if you're in a browser
-4. **It takes a screenshot** of the window you're looking at
-5. **You type your question and hit Enter** — your question, the context, and the screenshot are all sent to Claude automatically
-6. **Claude responds in the panel**, streaming as it arrives. Follow-up messages keep the full conversation context
-7. **Close the panel** and focus returns to exactly where you were
+### 7. Guided onboarding and settings
 
-## How it's built
+The current onboarding flow walks through:
 
-| File | What it does |
-|---|---|
-| `AppDelegate.swift` | Boots the app; listens globally for `Ctrl+Space` and `⌘+right-click` |
-| `FloatingPanel.swift` | The floating window — lives above all other windows, follows your cursor |
-| `SearchViewModel.swift` | Reads the Accessibility tree to identify what's under the cursor; takes screenshots |
-| `TerminalContentView.swift` | The chat UI that streams Claude's response |
-| `ClaudeProcessManager` | Shells out to the `claude` CLI to talk to Claude |
+- Claude CLI setup
+- Accessibility
+- Screen Recording
+- optional Microphone
+- optional Speech Recognition
+- optional Reminders
+- optional Input Monitoring
+
+Settings now expose invoke key choice, sound effects, Auto-voice, Claude defaults, quick actions, structured UI rendering, object overlays, and ghost cursor controls.
+
+## How It Works
+
+1. Hold your invoke key over something on screen.
+2. `This` inspects the object under your cursor using Accessibility APIs and related system context.
+3. Keep holding to speak, or release to anchor the panel and type.
+4. The app decides whether the request can be handled as a fast local action.
+5. If not, it packages your prompt with the captured context and hands the task to Claude CLI.
+6. The response streams into a compact chat UI, and long tasks can continue as persistent task sessions.
+
+## Ways To Launch It
+
+- Hold the invoke key to open the cursor panel.
+- Press invoke key + `Space` to open the command menu.
+- Double right-click, or right-click and hold, to open a context panel at the pointer.
+- Use the menu bar item to open the command menu, onboarding, settings, update checks, or feedback.
+
+The invoke key is configurable. The app currently supports `Fn`, `Control`, `Option`, or `Command`, with `Control` as the stored default when no preference has been set yet.
 
 ## Permissions
 
-| Permission | Why |
+| Permission | Why the app uses it |
 |---|---|
-| Accessibility | To read what UI element is under your cursor |
-| Screen Recording | To take a screenshot of the window you're looking at |
-| Automation | So Claude can run `osascript` to control other apps when you ask it to |
+| Accessibility | Inspect the UI under your pointer, detect windows and focused elements, and perform certain local UI actions |
+| Screen Recording | Capture the current screen or window for screenshot context |
+| Microphone | Record dictated prompts while invoking |
+| Speech Recognition | Transcribe spoken prompts on-device through macOS services |
+| Reminders | Read or create reminders when a task calls for it |
+| Input Monitoring | Observe modifier and input events outside the app when needed |
+
+Some Claude-driven workflows may also trigger separate macOS consent prompts later, depending on which apps or system services a task tries to control.
 
 ## Requirements
 
-- macOS 14.0+ (Sonoma)
-- [Claude CLI](https://github.com/anthropics/claude-code) installed
-- Accessibility and Screen Recording permissions granted to the app
+- macOS 14.0+
+- [Claude CLI](https://github.com/anthropics/claude-code) installed on the Mac you want to use with `This`
 
-## Setup
-
-To install the latest released build from the terminal:
+## Install The Latest Release
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/jasPreMar/this/main/scripts/install.sh | bash
 ```
 
-That downloads the latest DMG from GitHub Releases, installs `This.app`, opens it, and launches the onboarding wizard.
+That downloads the latest DMG from GitHub Releases, installs `This.app`, opens it, and starts onboarding.
 
-To build from source:
+If `/Applications` is not writable, the installer falls back to `~/Applications`.
+
+## Build From Source
 
 ```bash
 git clone https://github.com/jasPreMar/this.git
 cd this
 make build
-./.build/debug/This
 ```
 
-For permission testing, prefer launching the packaged app bundle instead of the raw binary so macOS sees a stable app path and signing identity:
+Run regression tests:
 
 ```bash
-./scripts/dev-app.sh --run
+make test
 ```
 
-To package it as a normal macOS app bundle:
+Run a signed debug app bundle so macOS permission behavior matches the packaged app more closely:
+
+```bash
+make run
+```
+
+Build a standard app bundle:
 
 ```bash
 make app
 open dist/This.app
 ```
 
-To install the app into `/Applications`:
+Install the app bundle:
 
 ```bash
 make install
 ```
 
-If your shell user cannot write to `/Applications`, rerun with `sudo` or choose a different destination:
-
-```bash
-sudo make install
-INSTALL_DIR="$HOME/Applications" make install
-```
-
-To build a drag-to-install disk image:
+Build a drag-to-install DMG:
 
 ```bash
 make dmg
 open dist/This.dmg
 ```
 
-For local permission persistence across updates, a self-signed identity is enough. For distribution to other Macs, it is not. Gatekeeper's malware warning only goes away when the shipped artifacts are signed with a real `Developer ID Application` certificate, notarized, and stapled.
+## First-Run Setup
 
-On first launch, This opens an onboarding wizard that walks through:
+On first launch, `This` opens onboarding so you can:
 
-- Installing or verifying Claude CLI
-- Accessibility
-- Screen Recording
-- Optional microphone and speech permissions for invoke-key dictation
-- Optional Automation approvals for the apps you want This to control
+- verify or install Claude CLI
+- choose an invoke key
+- grant required permissions
+- test the interaction model before using it in real apps
 
-You can reopen the wizard any time from the menu bar item with `Open Onboarding`.
+If you are testing permission behavior locally, prefer launching the packaged app bundle rather than the raw executable.
 
-To skip all permission dialogs entirely, run once after building:
+## Developer Notes
+
+### TCC grants for local testing
+
+If you want to skip the macOS permission dialogs during local development:
 
 ```bash
 sudo make grant
 ```
 
-This writes the grants directly to the TCC database so no popups ever appear.
+This writes grants directly into the user TCC database for the app bundle identifier used by local builds.
 
-The `.app` and `.dmg` targets now auto-prefer the best available signing identity in your keychain, starting with `Developer ID Application`, then local development identities. If no stable identity is available they fall back to ad-hoc signing. For a distributable artifact on other Macs, use your real Developer ID identity and notarize the result:
+To clear them again:
+
+```bash
+make reset-tcc
+```
+
+### Signing, notarization, and release packaging
+
+The build scripts prefer the best available signing identity in your keychain and fall back to ad-hoc signing when needed. For distribution outside your machine, use a real `Developer ID Application` identity and notarize the result.
+
+Build a Developer ID signed app:
 
 ```bash
 ./scripts/build-app.sh \
   --sign-mode developer-id \
   --sign-identity "Developer ID Application: Your Name (TEAMID)"
+```
 
+Notarize the app:
+
+```bash
 ./scripts/notarize.sh \
   --path dist/This.app \
   --apple-id "you@example.com" \
   --team-id "TEAMID" \
   --password "app-specific-password"
+```
 
+Build and notarize the DMG:
+
+```bash
 ./scripts/build-dmg.sh \
   --skip-build \
   --app-path dist/This.app \
@@ -185,48 +229,47 @@ The `.app` and `.dmg` targets now auto-prefer the best available signing identit
   --password "app-specific-password"
 ```
 
-If you prefer `notarytool` keychain profiles, `scripts/notarize.sh` also accepts `--keychain-profile <profile>`.
+For deeper release notes, see `MACOS_GATEKEEPER_NOTARIZATION_CHECKLIST.md`.
 
-## Sparkle Release Signing
+### Sparkle release signing
 
-The GitHub Actions release job signs the published DMG with Sparkle's Ed25519 key. It expects a `SPARKLE_PRIVATE_KEY` repository secret containing the exported private key contents, not the `sparkle:edSignature` output.
+The release workflow signs the published DMG with Sparkle's Ed25519 key. It expects a `SPARKLE_PRIVATE_KEY` repository secret containing the exported private key contents.
 
-The release workflow also requires these secrets for Gatekeeper-safe distribution:
-
-- `DEVELOPER_ID_APPLICATION_P12`
-- `DEVELOPER_ID_APPLICATION_PASSWORD`
-- `DEVELOPER_ID_APPLICATION_NAME`
-- `APPLE_ID`
-- `APPLE_TEAM_ID`
-- `APPLE_APP_SPECIFIC_PASSWORD`
-
-To create or recover the matching keypair:
+Generate a keypair:
 
 ```bash
 swift package resolve
 ./.build/artifacts/sparkle/Sparkle/bin/generate_keys
 ```
 
-That command prints the public key to embed in `SUPublicEDKey` inside `Sources/Info.plist`. To export the private key for CI:
+Export the private key for CI:
 
 ```bash
 ./.build/artifacts/sparkle/Sparkle/bin/generate_keys -x sparkle-private-key.txt
 ```
 
-Copy the contents of `sparkle-private-key.txt` into the `SPARKLE_PRIVATE_KEY` GitHub secret, then delete the file. The release workflow reads that secret with `sign_update --ed-key-file -`, signs `dist/This.dmg`, and writes the resulting signature into `appcast.xml`.
+Copy the contents of `sparkle-private-key.txt` into the `SPARKLE_PRIVATE_KEY` GitHub secret, then delete the file.
 
-## Usage
+## Source Map
 
-- **Ctrl+Space** — Open the panel at your cursor
-- **Hold ⌘** — Panel follows your cursor; release to anchor it and type
-- **Cmd+right-click** — Open the panel at the clicked location
+| File | Responsibility |
+|---|---|
+| `Sources/AppDelegate.swift` | App lifecycle, menu bar UI, hotkeys, command menu, task persistence, overlays |
+| `Sources/FloatingPanel.swift` | Cursor panel behavior, task icon mode, voice handoff, and pre-Claude routing |
+| `Sources/SearchViewModel.swift` | Hovered object detection, context assembly, screenshot capture, and prompt bootstrapping |
+| `Sources/CommandMenu.swift` | Global command menu UI and task switching |
+| `Sources/QuickActionCoordinator.swift` | Decides whether a request can run locally before Claude |
+| `Sources/LocalCommandExecutor.swift` | Executes supported app, window, and file quick actions |
+| `Sources/TerminalContentView.swift` | Claude process management, streaming chat UI, and structured responses |
+| `Sources/OnboardingView.swift` | First-run setup flow and tutorial |
+| `Sources/SettingsView.swift` | User preferences for invocation, chat, overlays, and permissions |
+| `Sources/GhostCursor*.swift` | Synthetic cursor feedback for running tasks |
+| `Sources/HighlightOverlay*.swift` | Element highlight overlays around detected UI objects |
 
-Once the panel appears, it shows context about the UI element under your cursor (app name, element role, hierarchy). Type a question and hit Enter to start a streaming conversation with Claude. Follow-up messages keep the same session context.
+## Things To Try
 
-## Things to Try
-
-- Hover over a button or menu item and ask "what does this do?"
-- Select some code in your editor, right-click, and ask Claude to explain or refactor it
-- Point at an error dialog and ask how to fix it
-- Hover over a browser element to automatically capture the page URL as context
-- Use follow-up messages to dig deeper without losing conversation context
+- Hold the invoke key over a browser tab and ask for a summary of the current page.
+- Hover a file or folder in Finder and ask to reveal it, open it, or copy its path.
+- Open the command menu and launch a task without switching away from your current app.
+- Enable the ghost cursor and watch how task attention is visualized during longer runs.
+- Turn on Structured UI and compare rich responses against plain markdown replies.
