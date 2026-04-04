@@ -120,6 +120,11 @@ private func commandMenuCarbonHotKeyHandler(
 
 class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
 
+    private struct RecentlyClosedTask: Codable, Equatable {
+        let sessionID: String
+        let insertionIndex: Int
+    }
+
     fileprivate enum CommandMenuPresentationSource {
         case statusItem
         case invokeHotKey
@@ -165,9 +170,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     private var feedbackPopover: NSPopover?
     private let soundPlayer = PTTSoundPlayer()
     private var taskRecordLookup: [ObjectIdentifier: TaskSessionRecord] = [:]
+    private let hiddenTaskSessionIDsKey = "hiddenTaskSessionIDs"
+    private let recentlyClosedTasksKey = "recentlyClosedTasks"
+    private var hiddenTaskSessionIDs: Set<String> = []
+    private var recentlyClosedTasks: [RecentlyClosedTask] = []
     @Published var commandMenuVoiceState: SearchViewModel.VoiceState = .idle
     @Published var commandMenuVoiceLevel: CGFloat = 0
     @Published var commandMenuChatRecord: TaskSessionRecord?
+    @Published var commandMenuShowingDraft = false
     @Published var commandMenuDismissing = false
     @Published var commandMenuQuery = ""
     @Published var commandMenuPinned = false {
@@ -189,6 +199,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     func applicationDidFinishLaunching(_ notification: Notification) {
         sharedAppDelegate = self
         AppSettings.registerDefaults()
+        restoreClosedTaskState()
         configureCommandMenuVoiceController()
         ghostCursorOverlayCoordinator = GhostCursorOverlayCoordinator(store: ghostCursorStore)
         highlightOverlayCoordinator = HighlightOverlayCoordinator(store: highlightOverlayStore)
@@ -803,6 +814,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             panel.onClickOutsideContent = { [weak self] in
                 self?.closeCommandMenu()
             }
+            panel.onShortcut = { [weak self] event in
+                self?.handleCommandMenuKeyEquivalent(event) ?? false
+            }
             commandMenuPanel = panel
         }
 
@@ -1208,6 +1222,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         setCommandMenuChatRecord(record)
     }
 
+    func openCommandMenuDraftTab(clearQuery: Bool = true) {
+        if clearQuery {
+            commandMenuQuery = ""
+        }
+        commandMenuShowingDraft = true
+        commandMenuChatRecord = nil
+    }
+
     func stopTaskRecord(_ record: TaskSessionRecord) {
         record.panel?.searchViewModel.claudeManager?.stop()
     }
@@ -1225,8 +1247,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
 
         // Delete persisted session from disk
         if let persistedId = record.persistedSessionId {
+            unhideTaskSession(id: persistedId)
+            removeRecentlyClosedTask(id: persistedId)
             ChatSessionStore.shared.delete(id: persistedId)
         } else if let panel = record.panel, let persistedId = panel.persistedSessionId {
+            unhideTaskSession(id: persistedId)
+            removeRecentlyClosedTask(id: persistedId)
             ChatSessionStore.shared.delete(id: persistedId)
         }
 
@@ -1238,6 +1264,63 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         panel.searchViewModel.claudeManager?.stop()
         panel.destroyPersistentTaskWindow()
         removePanel(panel)
+    }
+
+    func closeTaskRecord(_ record: TaskSessionRecord) {
+        guard let closingIndex = taskRecords.firstIndex(where: { $0.id == record.id }) else { return }
+
+        if let panel = record.panel {
+            panel.saveChatSession()
+        }
+
+        let persistedId = record.persistedSessionId ?? record.panel?.persistedSessionId
+        if let persistedId {
+            hideTaskSession(id: persistedId)
+            pushRecentlyClosedTask(id: persistedId, insertionIndex: closingIndex)
+        }
+
+        let wasSelected = commandMenuChatRecord?.id == record.id
+        let replacementRecord = replacementRecordAfterClosing(record, closingIndex: closingIndex)
+
+        if let panel = record.panel {
+            panel.searchViewModel.claudeManager?.stop()
+            panel.destroyPersistentTaskWindow()
+        }
+
+        taskRecords.removeAll { $0.id == record.id }
+
+        if wasSelected {
+            if let replacementRecord {
+                openTaskRecord(replacementRecord)
+            } else {
+                clearCommandMenuChatRecord()
+            }
+        } else {
+            objectWillChange.send()
+        }
+    }
+
+    func reopenLastClosedTaskRecord() {
+        while let closedTask = recentlyClosedTasks.popLast() {
+            persistRecentlyClosedTasks()
+
+            if taskRecords.contains(where: { $0.persistedSessionId == closedTask.sessionID }) {
+                continue
+            }
+
+            guard let session = ChatSessionStore.shared.load(id: closedTask.sessionID) else {
+                unhideTaskSession(id: closedTask.sessionID)
+                continue
+            }
+
+            unhideTaskSession(id: closedTask.sessionID)
+
+            let record = TaskSessionRecord(persisted: session)
+            let insertionIndex = min(max(closedTask.insertionIndex, 0), taskRecords.count)
+            taskRecords.insert(record, at: insertionIndex)
+            openTaskRecord(record)
+            return
+        }
     }
 
     func closeCommandMenu() {
@@ -1276,7 +1359,35 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     }
 
     func handleCommandMenuBackNavigation() {
-        clearCommandMenuChatRecord()
+        minimizeCommandMenu()
+    }
+
+    func minimizeCommandMenu() {
+        if let commandMenuChatRecord {
+            rememberedCommandMenuChatRecordID = commandMenuChatRecord.id
+        }
+        commandMenuChatRecord = nil
+        commandMenuShowingDraft = false
+        commandMenuQuery = ""
+    }
+
+    func reopenRememberedOrLatestTaskRecord() {
+        if let record = resolvedCommandMenuChatRecord(preferred: nil) ?? taskRecords.last {
+            openTaskRecord(record)
+        }
+    }
+
+    func commandMenuTabNavigationAnchorID() -> UUID? {
+        if let commandMenuChatRecord {
+            return commandMenuChatRecord.id
+        }
+
+        guard let rememberedID = rememberedCommandMenuChatRecordID,
+              taskRecords.contains(where: { $0.id == rememberedID }) else {
+            return nil
+        }
+
+        return rememberedID
     }
 
     func handleCommandMenuEscape() {
@@ -1285,8 +1396,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
                manager.status.isActive {
                 manager.stop()
             } else {
-                clearCommandMenuChatRecord()
+                minimizeCommandMenu()
             }
+        } else if commandMenuShowingDraft {
+            minimizeCommandMenu()
         } else {
             closeCommandMenu()
         }
@@ -1303,20 +1416,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         panels.append(panel)
         panel.persistedSessionId = persistedId
 
-        let workingDirectoryURL = session.workingDirectoryPath.map { URL(fileURLWithPath: $0) }
-
-        panel.searchViewModel.chatHistory = session.messages.map {
-            ChatMessage(role: $0.role, text: $0.text, structuredUI: $0.structuredUI)
-        }
-        panel.searchViewModel.currentSessionId = session.sessionId
-        panel.searchViewModel.currentSessionWorkingDirectoryURL = workingDirectoryURL
-        panel.searchViewModel.hasStartedClaudeConversation = session.sessionId != nil
-
-        panel.restoreHeadless(workingDirectoryURL: workingDirectoryURL)
-
         record.panel = panel
         let key = ObjectIdentifier(panel)
         taskRecordLookup[key] = record
+        panel.restorePersistedSession(session)
     }
 
     private func registerTaskRecord(for panel: FloatingPanel) {
@@ -1364,9 +1467,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     }
 
     private func loadPersistedChatSessions() {
-        let existingPersistedIds = Set(taskRecords.compactMap(\.persistedSessionId))
         let sessions = ChatSessionStore.shared.loadAll()
-        for session in sessions where !existingPersistedIds.contains(session.id) {
+        pruneClosedTaskState(using: sessions.map(\.id))
+        let existingPersistedIds = Set(taskRecords.compactMap(\.persistedSessionId))
+        for session in sessions where !hiddenTaskSessionIDs.contains(session.id) && !existingPersistedIds.contains(session.id) {
             let record = TaskSessionRecord(persisted: session)
             taskRecords.append(record)
         }
@@ -1406,11 +1510,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
 
     private func setCommandMenuChatRecord(_ record: TaskSessionRecord?) {
         commandMenuChatRecord = record
+        commandMenuShowingDraft = false
         rememberedCommandMenuChatRecordID = record?.id
     }
 
     private func clearCommandMenuChatRecord() {
         commandMenuChatRecord = nil
+        commandMenuShowingDraft = false
         rememberedCommandMenuChatRecordID = nil
     }
 
@@ -1447,6 +1553,117 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         }
 
         return nil
+    }
+
+    func handleCommandMenuKeyEquivalent(_ event: NSEvent) -> Bool {
+        let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+
+        if modifiers == [.command],
+           event.charactersIgnoringModifiers?.lowercased() == "m" {
+            minimizeCommandMenu()
+            return true
+        }
+
+        if modifiers == [.command],
+           event.charactersIgnoringModifiers?.lowercased() == "t" {
+            openCommandMenuDraftTab()
+            return true
+        }
+
+        if modifiers == [.command],
+           event.charactersIgnoringModifiers?.lowercased() == "w" {
+            if let commandMenuChatRecord {
+                closeTaskRecord(commandMenuChatRecord)
+                return true
+            }
+            if commandMenuShowingDraft {
+                minimizeCommandMenu()
+                return true
+            }
+            return false
+        }
+
+        if modifiers == [.command, .shift],
+           event.charactersIgnoringModifiers?.lowercased() == "t" {
+            reopenLastClosedTaskRecord()
+            return true
+        }
+
+        return false
+    }
+
+    private func replacementRecordAfterClosing(_ record: TaskSessionRecord, closingIndex: Int) -> TaskSessionRecord? {
+        let remainingRecords = taskRecords.filter { $0.id != record.id }
+        guard !remainingRecords.isEmpty else { return nil }
+
+        let replacementIndex = min(closingIndex, remainingRecords.count - 1)
+        return remainingRecords[replacementIndex]
+    }
+
+    private func restoreClosedTaskState() {
+        let defaults = UserDefaults.standard
+        hiddenTaskSessionIDs = Set(defaults.stringArray(forKey: hiddenTaskSessionIDsKey) ?? [])
+
+        guard let data = defaults.data(forKey: recentlyClosedTasksKey),
+              let stack = try? JSONDecoder().decode([RecentlyClosedTask].self, from: data) else {
+            recentlyClosedTasks = []
+            return
+        }
+
+        recentlyClosedTasks = stack
+    }
+
+    private func persistHiddenTaskSessionIDs() {
+        UserDefaults.standard.set(Array(hiddenTaskSessionIDs), forKey: hiddenTaskSessionIDsKey)
+    }
+
+    private func persistRecentlyClosedTasks() {
+        let data = try? JSONEncoder().encode(recentlyClosedTasks)
+        UserDefaults.standard.set(data, forKey: recentlyClosedTasksKey)
+    }
+
+    private func pruneClosedTaskState(using validSessionIDs: [String]) {
+        let validIDSet = Set(validSessionIDs)
+        let filteredHiddenIDs = hiddenTaskSessionIDs.intersection(validIDSet)
+        if filteredHiddenIDs != hiddenTaskSessionIDs {
+            hiddenTaskSessionIDs = filteredHiddenIDs
+            persistHiddenTaskSessionIDs()
+        }
+
+        let filteredRecentlyClosedTasks = recentlyClosedTasks.filter { hiddenTaskSessionIDs.contains($0.sessionID) }
+        if filteredRecentlyClosedTasks != recentlyClosedTasks {
+            recentlyClosedTasks = filteredRecentlyClosedTasks
+            persistRecentlyClosedTasks()
+        }
+    }
+
+    private func hideTaskSession(id: String) {
+        hiddenTaskSessionIDs.insert(id)
+        persistHiddenTaskSessionIDs()
+    }
+
+    private func unhideTaskSession(id: String) {
+        if hiddenTaskSessionIDs.remove(id) != nil {
+            persistHiddenTaskSessionIDs()
+        }
+    }
+
+    private func pushRecentlyClosedTask(id: String, insertionIndex: Int) {
+        removeRecentlyClosedTask(id: id)
+        recentlyClosedTasks.append(
+            RecentlyClosedTask(
+                sessionID: id,
+                insertionIndex: insertionIndex
+            )
+        )
+        persistRecentlyClosedTasks()
+    }
+
+    private func removeRecentlyClosedTask(id: String) {
+        let filteredTasks = recentlyClosedTasks.filter { $0.sessionID != id }
+        guard filteredTasks != recentlyClosedTasks else { return }
+        recentlyClosedTasks = filteredTasks
+        persistRecentlyClosedTasks()
     }
 
     private func setupGhostCursorWorkspaceObservers() {

@@ -90,6 +90,12 @@ final class ChatSessionStore {
         }
     }
 
+    func load(id: String) -> PersistedChatSession? {
+        let url = fileURL(for: id)
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        return try? decoder.decode(PersistedChatSession.self, from: data)
+    }
+
     func delete(id: String) {
         try? FileManager.default.removeItem(at: fileURL(for: id))
     }
