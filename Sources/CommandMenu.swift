@@ -2,9 +2,216 @@ import AppKit
 import MarkdownUI
 import SwiftUI
 
+private enum CommandMenuChromeMetrics {
+    static let controlWidth: CGFloat = 32
+    static let controlHeight: CGFloat = 28
+    static let edgePadding: CGFloat = 8
+    static let tabSpacing: CGFloat = 1
+    static let tabCornerRadius: CGFloat = 8
+    static let hoverFadeOutDuration = 0.1
+}
+
+private func updateCommandMenuHoverState(_ hovering: Bool, state: Binding<Bool>) {
+    if hovering {
+        state.wrappedValue = true
+    } else {
+        withAnimation(.easeOut(duration: CommandMenuChromeMetrics.hoverFadeOutDuration)) {
+            state.wrappedValue = false
+        }
+    }
+}
+
+private final class CommandMenuChatScrollController: ObservableObject {
+    enum ScrollOutcome {
+        case unavailable
+        case moved
+        case atBoundary
+    }
+
+    enum VerticalDirection {
+        case up
+        case down
+    }
+
+    private weak var scrollView: NSScrollView?
+    private var boundsObserver: NSObjectProtocol?
+    private let boundaryTolerance: CGFloat = 2
+    private let minimumStep: CGFloat = 24
+    @Published private(set) var shouldAutoFollowBottom = true
+
+    deinit {
+        detach()
+    }
+
+    func attach(to scrollView: NSScrollView?) {
+        guard self.scrollView !== scrollView else { return }
+        detach()
+        self.scrollView = scrollView
+        shouldAutoFollowBottom = true
+        guard let scrollView else { return }
+        scrollView.contentView.postsBoundsChangedNotifications = true
+        boundsObserver = NotificationCenter.default.addObserver(
+            forName: NSView.boundsDidChangeNotification,
+            object: scrollView.contentView,
+            queue: .main
+        ) { [weak self] _ in
+            self?.syncAutoFollowState()
+        }
+    }
+
+    func detach() {
+        if let boundsObserver {
+            NotificationCenter.default.removeObserver(boundsObserver)
+        }
+        boundsObserver = nil
+        scrollView = nil
+        shouldAutoFollowBottom = true
+    }
+
+    func enableAutoFollowBottom() {
+        shouldAutoFollowBottom = true
+    }
+
+    func suspendAutoFollowBottom() {
+        shouldAutoFollowBottom = false
+    }
+
+    func scrollByKeyboard(_ direction: VerticalDirection) -> ScrollOutcome {
+        guard let metrics = currentMetrics() else { return .unavailable }
+        switch direction {
+        case .up:
+            if metrics.isAtTop(tolerance: boundaryTolerance) {
+                return .atBoundary
+            }
+            let step = max(metrics.scrollView.verticalLineScroll * 3, minimumStep)
+            setOffsetFromTop(metrics.currentOffsetFromTop - step, using: metrics)
+            return .moved
+        case .down:
+            if metrics.isAtBottom(tolerance: boundaryTolerance) {
+                return .atBoundary
+            }
+            let step = max(metrics.scrollView.verticalLineScroll * 3, minimumStep)
+            setOffsetFromTop(metrics.currentOffsetFromTop + step, using: metrics)
+            return .moved
+        }
+    }
+
+    func scrollToTop() -> ScrollOutcome {
+        guard let metrics = currentMetrics() else { return .unavailable }
+        if metrics.isAtTop(tolerance: boundaryTolerance) {
+            return .atBoundary
+        }
+        setOffsetFromTop(0, using: metrics)
+        return .moved
+    }
+
+    func scrollToBottom() -> ScrollOutcome {
+        guard let metrics = currentMetrics() else { return .unavailable }
+        if metrics.isAtBottom(tolerance: boundaryTolerance) {
+            return .atBoundary
+        }
+        setOffsetFromTop(metrics.maxOffsetFromTop, using: metrics)
+        return .moved
+    }
+
+    func scrollByPage(_ direction: VerticalDirection) -> ScrollOutcome {
+        guard let metrics = currentMetrics() else { return .unavailable }
+        let step = max(metrics.visibleHeight * 0.85, 72)
+        switch direction {
+        case .up:
+            if metrics.isAtTop(tolerance: boundaryTolerance) {
+                return .atBoundary
+            }
+            setOffsetFromTop(metrics.currentOffsetFromTop - step, using: metrics)
+            return .moved
+        case .down:
+            if metrics.isAtBottom(tolerance: boundaryTolerance) {
+                return .atBoundary
+            }
+            setOffsetFromTop(metrics.currentOffsetFromTop + step, using: metrics)
+            return .moved
+        }
+    }
+
+    private func currentMetrics() -> ScrollMetrics? {
+        guard let scrollView,
+              let documentView = scrollView.documentView else { return nil }
+        let clipView = scrollView.contentView
+        let visibleRect = clipView.documentVisibleRect
+        let maxOffsetFromTop = max(documentView.bounds.height - visibleRect.height, 0)
+        let currentOffsetFromTop: CGFloat
+        if documentView.isFlipped {
+            currentOffsetFromTop = visibleRect.minY
+        } else {
+            currentOffsetFromTop = maxOffsetFromTop - visibleRect.minY
+        }
+        return ScrollMetrics(
+            scrollView: scrollView,
+            clipView: clipView,
+            documentView: documentView,
+            currentOffsetFromTop: currentOffsetFromTop,
+            maxOffsetFromTop: maxOffsetFromTop
+        )
+    }
+
+    private func setOffsetFromTop(_ offsetFromTop: CGFloat, using metrics: ScrollMetrics) {
+        let clampedOffset = min(max(offsetFromTop, 0), metrics.maxOffsetFromTop)
+        let targetY: CGFloat
+        if metrics.documentView.isFlipped {
+            targetY = clampedOffset
+        } else {
+            targetY = metrics.maxOffsetFromTop - clampedOffset
+        }
+        metrics.clipView.scroll(to: NSPoint(x: metrics.clipView.bounds.origin.x, y: targetY))
+        metrics.scrollView.reflectScrolledClipView(metrics.clipView)
+        shouldAutoFollowBottom = clampedOffset >= metrics.maxOffsetFromTop - boundaryTolerance
+    }
+
+    private func syncAutoFollowState() {
+        guard let metrics = currentMetrics() else { return }
+        shouldAutoFollowBottom = metrics.isAtBottom(tolerance: boundaryTolerance)
+    }
+
+    private struct ScrollMetrics {
+        let scrollView: NSScrollView
+        let clipView: NSClipView
+        let documentView: NSView
+        let currentOffsetFromTop: CGFloat
+        let maxOffsetFromTop: CGFloat
+        var visibleHeight: CGFloat { clipView.bounds.height }
+
+        func isAtTop(tolerance: CGFloat) -> Bool {
+            currentOffsetFromTop <= tolerance
+        }
+
+        func isAtBottom(tolerance: CGFloat) -> Bool {
+            currentOffsetFromTop >= maxOffsetFromTop - tolerance
+        }
+    }
+}
+
+private struct CommandMenuScrollViewAccessor: NSViewRepresentable {
+    let onResolve: (NSScrollView?) -> Void
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView(frame: .zero)
+        DispatchQueue.main.async {
+            onResolve(view.enclosingScrollView)
+        }
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        DispatchQueue.main.async {
+            onResolve(nsView.enclosingScrollView)
+        }
+    }
+}
+
 final class CommandMenuPanel: NSPanel {
     var onEscape: (() -> Void)?
     var onClickOutsideContent: (() -> Void)?
+    var onShortcut: ((NSEvent) -> Bool)?
     var isPinned = false
 
     private var hostingView: NSHostingView<AnyView>?
@@ -31,6 +238,13 @@ final class CommandMenuPanel: NSPanel {
 
     override func cancelOperation(_ sender: Any?) {
         onEscape?()
+    }
+
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if onShortcut?(event) == true {
+            return true
+        }
+        return super.performKeyEquivalent(with: event)
     }
 
     func fillScreen(_ screen: NSScreen) {
@@ -118,6 +332,7 @@ struct CommandMenuView: View {
     @State private var isContentVisible = false
     @State private var textWidth: CGFloat = FocusedTextField.minWidth
     @State private var textHeight: CGFloat = 20
+    @StateObject private var chatScrollController = CommandMenuChatScrollController()
 
     private var usesNativeGlassSurface: Bool {
         false
@@ -141,11 +356,15 @@ struct CommandMenuView: View {
     }
 
     private var isExpanded: Bool {
-        appDelegate.commandMenuChatRecord != nil
+        activeChatRecord != nil || isDraftSelected
     }
 
     private var activeChatRecord: TaskSessionRecord? {
         appDelegate.commandMenuChatRecord
+    }
+
+    private var isDraftSelected: Bool {
+        appDelegate.commandMenuShowingDraft
     }
 
     private var hasTasks: Bool {
@@ -216,7 +435,7 @@ struct CommandMenuView: View {
                 onSettings: { openSettings() },
                 onQuit: { appDelegate.quitFromCommandMenu() }
             )
-            .padding(.leading, 12)
+            .padding(.leading, CommandMenuChromeMetrics.edgePadding)
 
             Spacer(minLength: 0)
 
@@ -226,66 +445,61 @@ struct CommandMenuView: View {
                 CommandMenuMinimizeCloseButton(
                     isExpanded: isExpanded,
                     onMinimize: {
-                        appDelegate.handleCommandMenuBackNavigation()
-                        query = ""
+                        appDelegate.minimizeCommandMenu()
                     },
                     onClose: { appDelegate.closeCommandMenu() }
                 )
             }
-            .padding(.trailing, 12)
+            .padding(.trailing, CommandMenuChromeMetrics.edgePadding)
         }
         .frame(height: Self.fallbackBottomBarHeight)
         .background(Color.black.opacity(0.035))
     }
 
     private var headerRow: some View {
-        HStack(spacing: 0) {
-            if hasTasks {
-                ScrollViewReader { proxy in
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 6) {
-                            ForEach(tabs) { task in
-                                CommandMenuTabButton(
-                                    task: task,
-                                    isSelected: activeChatRecord?.id == task.id,
-                                    onTap: { toggleTab(task) }
-                                )
-                                .id(task.id)
-                            }
+        HStack(spacing: CommandMenuChromeMetrics.tabSpacing) {
+            ScrollViewReader { proxy in
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: CommandMenuChromeMetrics.tabSpacing) {
+                        ForEach(tabs) { task in
+                            CommandMenuTabButton(
+                                task: task,
+                                isSelected: activeChatRecord?.id == task.id,
+                                onTap: { toggleTab(task) },
+                                onClose: { closeTab(task) }
+                            )
+                            .id(task.id)
                         }
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
                     }
-                    .onChange(of: activeChatRecord?.id) { _, newID in
-                        guard let newID else { return }
-                        withAnimation(.easeInOut(duration: 0.2)) {
-                            proxy.scrollTo(newID, anchor: .center)
-                        }
+                    .padding(.leading, CommandMenuChromeMetrics.edgePadding)
+                    .padding(.vertical, 8)
+                }
+                .onAppear {
+                    DispatchQueue.main.async {
+                        scrollTabStripToInitialPosition(proxy)
                     }
                 }
-            } else {
-                Spacer(minLength: 0)
+                .onChange(of: activeChatRecord?.id) { _, newID in
+                    guard let newID else { return }
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        proxy.scrollTo(newID, anchor: .center)
+                    }
+                }
             }
 
-            if isExpanded {
-                Button(action: {
-                    appDelegate.handleCommandMenuBackNavigation()
-                    query = ""
-                }) {
-                    Image(systemName: "plus")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 6)
-                        .background(
-                            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                .fill(Color.clear)
-                        )
-                        .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                }
-                .buttonStyle(.plain)
-                .padding(.trailing, 12)
-            }
+            CommandMenuNewTabButton(
+                isSelected: isDraftSelected,
+                action: { openNewTab() }
+            )
+            .padding(.trailing, CommandMenuChromeMetrics.edgePadding)
+        }
+    }
+
+    private func scrollTabStripToInitialPosition(_ proxy: ScrollViewProxy) {
+        if let activeID = activeChatRecord?.id {
+            proxy.scrollTo(activeID, anchor: .center)
+        } else if let latestID = tabs.last?.id {
+            proxy.scrollTo(latestID, anchor: .trailing)
         }
     }
 
@@ -294,10 +508,13 @@ struct CommandMenuView: View {
         if let chatRecord = activeChatRecord,
            let viewModel = chatRecord.panel?.searchViewModel {
             CommandMenuChatSection(
-                viewModel: viewModel
+                viewModel: viewModel,
+                scrollController: chatScrollController
             )
             .id(chatRecord.id)
             .clipped()
+        } else if isDraftSelected {
+            CommandMenuDraftSection()
         }
     }
 
@@ -306,21 +523,22 @@ struct CommandMenuView: View {
             text: $appDelegate.commandMenuQuery,
             textWidth: $textWidth,
             textHeight: $textHeight,
-            placeholder: isExpanded ? "Message this task..." : "Ask Claude Code anything…",
+            placeholder: activeChatRecord != nil ? "Message this task..." : "Ask Claude Code anything…",
             voiceState: appDelegate.commandMenuVoiceState,
             voiceLevel: appDelegate.commandMenuVoiceLevel,
             isStreaming: activeChatRecord?.isRunning == true,
             onSubmit: submitInput,
             onStop: stopActiveTask,
             onVoice: { self.appDelegate.toggleCommandMenuVoice() },
-            onKeyDown: handleInputKeyDown
+            onKeyDown: handleInputKeyDown,
+            onCommandSelector: handleInputCommandSelector
         )
     }
 
 
     private func switchToPreviousTab() {
         guard !tabs.isEmpty else { return }
-        guard let currentID = activeChatRecord?.id,
+        guard let currentID = activeChatRecord?.id ?? appDelegate.commandMenuTabNavigationAnchorID(),
               let currentIndex = tabs.firstIndex(where: { $0.id == currentID }) else {
             if let last = tabs.last {
                 appDelegate.openTaskRecord(last)
@@ -333,7 +551,7 @@ struct CommandMenuView: View {
 
     private func switchToNextTab() {
         guard !tabs.isEmpty else { return }
-        guard let currentID = activeChatRecord?.id,
+        guard let currentID = activeChatRecord?.id ?? appDelegate.commandMenuTabNavigationAnchorID(),
               let currentIndex = tabs.firstIndex(where: { $0.id == currentID }) else {
             if let first = tabs.first {
                 appDelegate.openTaskRecord(first)
@@ -350,6 +568,14 @@ struct CommandMenuView: View {
         } else {
             appDelegate.openTaskRecord(task)
         }
+    }
+
+    private func closeTab(_ task: TaskSessionRecord) {
+        appDelegate.closeTaskRecord(task)
+    }
+
+    private func openNewTab() {
+        appDelegate.openCommandMenuDraftTab()
     }
 
     private func selectTabByNumber(_ number: Int) {
@@ -382,6 +608,69 @@ struct CommandMenuView: View {
             if appDelegate.launchTaskFromCommandMenu(query: trimmedQuery) != nil {
                 query = ""
             }
+        }
+    }
+
+    private func handleUpNavigation(command: Bool) -> Bool {
+        guard queryIsEmpty else { return false }
+
+        if activeChatRecord != nil, !isDraftSelected {
+            chatScrollController.suspendAutoFollowBottom()
+            let outcome = command ? chatScrollController.scrollToTop() : chatScrollController.scrollByKeyboard(.up)
+            return outcome != .unavailable
+        }
+
+        if !command, !isExpanded {
+            appDelegate.reopenRememberedOrLatestTaskRecord()
+            return true
+        }
+
+        return false
+    }
+
+    private func handleDownNavigation(command: Bool) -> Bool {
+        guard queryIsEmpty,
+              activeChatRecord != nil,
+              !isDraftSelected else { return false }
+
+        chatScrollController.suspendAutoFollowBottom()
+        let outcome = command ? chatScrollController.scrollToBottom() : chatScrollController.scrollByKeyboard(.down)
+        switch outcome {
+        case .atBoundary:
+            appDelegate.minimizeCommandMenu()
+            return true
+        case .moved:
+            return true
+        case .unavailable:
+            return false
+        }
+    }
+
+    private func handlePageUpNavigation() -> Bool {
+        guard queryIsEmpty,
+              activeChatRecord != nil,
+              !isDraftSelected else { return true }
+
+        chatScrollController.suspendAutoFollowBottom()
+        let outcome = chatScrollController.scrollByPage(.up)
+        return outcome != .unavailable
+    }
+
+    private func handlePageDownNavigation() -> Bool {
+        guard queryIsEmpty,
+              activeChatRecord != nil,
+              !isDraftSelected else { return true }
+
+        chatScrollController.suspendAutoFollowBottom()
+        let outcome = chatScrollController.scrollByPage(.down)
+        switch outcome {
+        case .atBoundary:
+            appDelegate.minimizeCommandMenu()
+            return true
+        case .moved:
+            return true
+        case .unavailable:
+            return false
         }
     }
 
@@ -438,13 +727,69 @@ struct CommandMenuView: View {
                 openSettings()
                 return true
             }
+        case 46: // M
+            if hasCommand {
+                appDelegate.minimizeCommandMenu()
+                return true
+            }
+        case 17: // T
+            if hasCommand && hasShift {
+                appDelegate.reopenLastClosedTaskRecord()
+                return true
+            }
+            if hasCommand {
+                openNewTab()
+                return true
+            }
+        case 48: // Tab
+            if modifiers.isEmpty {
+                return handlePageDownNavigation()
+            }
+            if modifiers == [.shift] {
+                return handlePageUpNavigation()
+            }
         case 33: // [
             if hasCommand && hasShift {
                 switchToPreviousTab()
                 return true
             }
+        case 13: // W
+            if hasCommand {
+                if let activeChatRecord {
+                    appDelegate.closeTaskRecord(activeChatRecord)
+                    return true
+                }
+                if isDraftSelected {
+                    appDelegate.minimizeCommandMenu()
+                    return true
+                }
+            }
+        case 126: // Up arrow
+            if modifiers.isEmpty {
+                return handleUpNavigation(command: false)
+            }
+            if modifiers == [.command] {
+                return handleUpNavigation(command: true)
+            }
+        case 125: // Down arrow
+            if modifiers.isEmpty {
+                return handleDownNavigation(command: false)
+            }
+            if modifiers == [.command] {
+                return handleDownNavigation(command: true)
+            }
+        case 123: // Left arrow
+            if modifiers.isEmpty, queryIsEmpty {
+                switchToPreviousTab()
+                return true
+            }
         case 30: // ]
             if hasCommand && hasShift {
+                switchToNextTab()
+                return true
+            }
+        case 124: // Right arrow
+            if modifiers.isEmpty, queryIsEmpty {
                 switchToNextTab()
                 return true
             }
@@ -461,6 +806,46 @@ struct CommandMenuView: View {
             }
         default:
             break
+        }
+
+        return false
+    }
+
+    private func handleInputCommandSelector(_ selector: Selector) -> Bool {
+        guard queryIsEmpty else { return false }
+
+        if selector == #selector(NSResponder.moveUp(_:)) {
+            return handleUpNavigation(command: false)
+        }
+
+        if selector == #selector(NSResponder.moveToBeginningOfDocument(_:)) {
+            return handleUpNavigation(command: true)
+        }
+
+        if selector == #selector(NSResponder.moveDown(_:)) {
+            return handleDownNavigation(command: false)
+        }
+
+        if selector == #selector(NSResponder.moveToEndOfDocument(_:)) {
+            return handleDownNavigation(command: true)
+        }
+
+        if selector == #selector(NSResponder.insertTab(_:)) {
+            return handlePageDownNavigation()
+        }
+
+        if selector == #selector(NSResponder.insertBacktab(_:)) {
+            return handlePageUpNavigation()
+        }
+
+        if selector == #selector(NSResponder.moveLeft(_:)) {
+            switchToPreviousTab()
+            return true
+        }
+
+        if selector == #selector(NSResponder.moveRight(_:)) {
+            switchToNextTab()
+            return true
         }
 
         return false
@@ -509,6 +894,7 @@ private struct CommandMenuSurfaceChrome: ViewModifier {
 
 private struct CommandMenuChatSection: View {
     @ObservedObject var viewModel: SearchViewModel
+    @ObservedObject var scrollController: CommandMenuChatScrollController
     @State private var scrollContentHeight: CGFloat = 0
     private let maxScrollAreaHeight: CGFloat = 500
 
@@ -520,46 +906,58 @@ private struct CommandMenuChatSection: View {
                     Spacer(minLength: 0)
                 }
                 .background(
-                    GeometryReader { geometry in
-                        Color.clear.preference(
-                            key: CommandMenuChatContentHeightPreferenceKey.self,
-                            value: geometry.size.height
-                        )
+                    ZStack {
+                        GeometryReader { geometry in
+                            Color.clear.preference(
+                                key: CommandMenuChatContentHeightPreferenceKey.self,
+                                value: geometry.size.height
+                            )
+                        }
+                        CommandMenuScrollViewAccessor { scrollView in
+                            scrollController.attach(to: scrollView)
+                        }
                     }
                 )
             }
             .frame(height: min(max(scrollContentHeight + 16, 60), maxScrollAreaHeight))
             .onAppear {
-                proxy.scrollTo("chatBottom", anchor: .bottom)
+                forceScrollToBottom(proxy, animated: false)
             }
             .onChange(of: viewModel.claudeManager?.outputText) { _, _ in
-                withAnimation(.easeOut(duration: 0.1)) {
-                    proxy.scrollTo("chatBottom", anchor: .bottom)
-                }
+                scrollToBottomIfNeeded(proxy)
             }
             .onChange(of: viewModel.chatHistory.count) { _, _ in
-                withAnimation(.easeOut(duration: 0.1)) {
-                    proxy.scrollTo("chatBottom", anchor: .bottom)
+                if viewModel.claudeManager?.status == .done {
+                    forceScrollToBottom(proxy)
+                } else {
+                    scrollToBottomIfNeeded(proxy)
                 }
             }
             .onChange(of: viewModel.claudeManager?.events.count) { _, _ in
-                withAnimation(.easeOut(duration: 0.1)) {
-                    proxy.scrollTo("chatBottom", anchor: .bottom)
-                }
-            }
-            .onChange(of: viewModel.claudeManager?.status) { _, _ in
-                withAnimation(.easeOut(duration: 0.1)) {
-                    proxy.scrollTo("chatBottom", anchor: .bottom)
-                }
-            }
-            .onChange(of: viewModel.claudeManager?.activeToolName) { _, _ in
-                withAnimation(.easeOut(duration: 0.1)) {
-                    proxy.scrollTo("chatBottom", anchor: .bottom)
-                }
+                scrollToBottomIfNeeded(proxy)
             }
             .onPreferenceChange(CommandMenuChatContentHeightPreferenceKey.self) { height in
                 scrollContentHeight = height
             }
+            .onDisappear {
+                scrollController.detach()
+            }
+        }
+    }
+
+    private func scrollToBottomIfNeeded(_ proxy: ScrollViewProxy) {
+        guard scrollController.shouldAutoFollowBottom else { return }
+        forceScrollToBottom(proxy)
+    }
+
+    private func forceScrollToBottom(_ proxy: ScrollViewProxy, animated: Bool = true) {
+        scrollController.enableAutoFollowBottom()
+        if animated {
+            withAnimation(.easeOut(duration: 0.1)) {
+                proxy.scrollTo("chatBottom", anchor: .bottom)
+            }
+        } else {
+            proxy.scrollTo("chatBottom", anchor: .bottom)
         }
     }
 
@@ -594,12 +992,54 @@ private struct CommandMenuChatSection: View {
     }
 }
 
+private struct CommandMenuDraftSection: View {
+    private static let minHeight: CGFloat = 132
+
+    var body: some View {
+        Color.clear
+            .frame(maxWidth: .infinity)
+            .frame(height: Self.minHeight)
+    }
+}
+
+private struct CommandMenuNewTabButton: View {
+    let isSelected: Bool
+    let action: () -> Void
+
+    @State private var isHovering = false
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "plus")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle((isSelected || isHovering) ? .primary : .secondary)
+                .frame(
+                    width: CommandMenuChromeMetrics.controlWidth,
+                    height: CommandMenuChromeMetrics.controlHeight
+                )
+                .contentShape(
+                    RoundedRectangle(
+                        cornerRadius: CommandMenuChromeMetrics.tabCornerRadius,
+                        style: .continuous
+                    )
+                )
+        }
+        .buttonStyle(CommandMenuChromeButtonStyle(isHovering: isHovering, isActive: isSelected))
+        .onHover { hovering in
+            updateCommandMenuHoverState(hovering, state: $isHovering)
+        }
+        .help("New tab")
+    }
+}
+
 private struct CommandMenuTabButton: View {
     @ObservedObject var task: TaskSessionRecord
     let isSelected: Bool
     let onTap: () -> Void
+    let onClose: () -> Void
 
     @State private var isHovering = false
+    @State private var isCloseHovering = false
 
     private var backgroundOpacity: Double {
         if isSelected { return 0.12 }
@@ -608,43 +1048,67 @@ private struct CommandMenuTabButton: View {
     }
 
     var body: some View {
-        Button(action: onTap) {
-            HStack(spacing: 6) {
-                if let icon = task.icon {
-                    Image(nsImage: icon)
-                        .resizable()
-                        .interpolation(.high)
-                        .scaledToFit()
-                        .frame(width: 16, height: 16)
-                        .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
-                }
+        HStack(spacing: 4) {
+            Button(action: onTap) {
+                HStack(spacing: 6) {
+                    if let icon = task.icon {
+                        Image(nsImage: icon)
+                            .resizable()
+                            .interpolation(.high)
+                            .scaledToFit()
+                            .frame(width: 16, height: 16)
+                            .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+                    }
 
-                Text(task.title)
-                    .font(.system(size: 12, weight: isSelected ? .semibold : .medium))
-                    .foregroundStyle(isSelected ? .primary : .secondary)
-                    .lineLimit(1)
+                    Text(task.title)
+                        .font(.system(size: 12, weight: isSelected ? .semibold : .medium))
+                        .foregroundStyle(isSelected ? .primary : .secondary)
+                        .lineLimit(1)
 
-                if task.isRunning {
-                    Circle()
-                        .fill(Color.green)
-                        .frame(width: 6, height: 6)
-                } else if task.isUnread {
-                    Circle()
-                        .fill(Color.secondary)
-                        .frame(width: 6, height: 6)
+                    if task.isRunning {
+                        Circle()
+                            .fill(Color.green)
+                            .frame(width: 6, height: 6)
+                    } else if task.isUnread {
+                        Circle()
+                            .fill(Color.secondary)
+                            .frame(width: 6, height: 6)
+                    }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(Color.black.opacity(backgroundOpacity))
-            )
-            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .buttonStyle(.plain)
+
+            Button(action: onClose) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(Color.black.opacity(isCloseHovering ? 0.12 : 0.06))
+
+                    Image(systemName: "xmark")
+                        .font(.system(size: 8, weight: .semibold))
+                        .foregroundStyle(Color.secondary)
+                }
+                .frame(width: 20, height: 20)
+                .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .opacity(isHovering ? 1 : 0)
+            .allowsHitTesting(isHovering)
+            .onHover { hovering in
+                updateCommandMenuHoverState(hovering, state: $isCloseHovering)
+            }
         }
-        .buttonStyle(.plain)
+        .padding(.leading, 10)
+        .padding(.trailing, 6)
+        .padding(.vertical, 6)
+        .background(
+            RoundedRectangle(cornerRadius: CommandMenuChromeMetrics.tabCornerRadius, style: .continuous)
+                .fill(Color.black.opacity(backgroundOpacity))
+        )
+        .contentShape(RoundedRectangle(cornerRadius: CommandMenuChromeMetrics.tabCornerRadius, style: .continuous))
         .onHover { hovering in
-            isHovering = hovering
+            updateCommandMenuHoverState(hovering, state: $isHovering)
         }
     }
 }
@@ -669,6 +1133,7 @@ private struct CommandMenuTextInputRow: View {
     let onStop: () -> Void
     let onVoice: () -> Void
     var onKeyDown: ((NSEvent) -> Bool)? = nil
+    var onCommandSelector: ((Selector) -> Bool)? = nil
 
     private var hasText: Bool {
         !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -689,6 +1154,7 @@ private struct CommandMenuTextInputRow: View {
                     textHeight: $textHeight,
                     onSubmit: onSubmit,
                     onKeyDown: onKeyDown,
+                    onCommandSelector: onCommandSelector,
                     font: .systemFont(ofSize: 17, weight: .regular)
                 )
                 .frame(height: max(textHeight, 22))
@@ -709,7 +1175,8 @@ private struct CommandMenuTextInputRow: View {
                 onVoice: onVoice
             )
         }
-        .padding(.horizontal, 18)
+        .padding(.leading, 18)
+        .padding(.trailing, CommandMenuChromeMetrics.edgePadding)
         .padding(.vertical, 16)
     }
 }
@@ -764,12 +1231,20 @@ private struct CommandMenuInputActionButton: View {
             Image(systemName: icon)
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(isHovering ? Color.primary : Color.secondary)
-                .frame(width: 24, height: 24)
-                .contentShape(Rectangle())
+                .frame(
+                    width: CommandMenuChromeMetrics.controlWidth,
+                    height: CommandMenuChromeMetrics.controlHeight
+                )
+                .contentShape(
+                    RoundedRectangle(
+                        cornerRadius: CommandMenuChromeMetrics.tabCornerRadius,
+                        style: .continuous
+                    )
+                )
         }
-        .buttonStyle(.plain)
+        .buttonStyle(CommandMenuChromeButtonStyle(isHovering: isHovering))
         .onHover { hovering in
-            isHovering = hovering
+            updateCommandMenuHoverState(hovering, state: $isHovering)
         }
         .accessibilityLabel(accessibilityLabel)
         .transition(.opacity)
@@ -821,12 +1296,15 @@ private struct SettingsMenuButton: View {
                         .font(.system(size: 14, weight: .semibold))
                 }
             }
-            .foregroundStyle(.secondary)
-            .frame(width: 32, height: 28)
+            .foregroundStyle(isHovering ? .primary : .secondary)
+            .frame(
+                width: CommandMenuChromeMetrics.controlWidth,
+                height: CommandMenuChromeMetrics.controlHeight
+            )
         }
-        .buttonStyle(SettingsMenuButtonStyle(isHovering: isHovering))
+        .buttonStyle(CommandMenuChromeButtonStyle(isHovering: isHovering))
         .onHover { hovering in
-            isHovering = hovering
+            updateCommandMenuHoverState(hovering, state: $isHovering)
             if hovering {
                 NSCursor.pointingHand.push()
             } else {
@@ -908,15 +1386,19 @@ private struct SettingsMenuButton: View {
     }
 }
 
-private struct SettingsMenuButtonStyle: ButtonStyle {
+private struct CommandMenuChromeButtonStyle: ButtonStyle {
     var isHovering: Bool
+    var isActive = false
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .background(
-                Capsule(style: .continuous)
+                RoundedRectangle(
+                    cornerRadius: CommandMenuChromeMetrics.tabCornerRadius,
+                    style: .continuous
+                )
                     .fill(Color.black.opacity(
-                        configuration.isPressed ? 0.14 : (isHovering ? 0.08 : 0)
+                        configuration.isPressed ? 0.14 : (isActive ? 0.12 : (isHovering ? 0.06 : 0))
                     ))
             )
     }
@@ -946,12 +1428,15 @@ private struct CommandMenuMinimizeCloseButton: View {
         } label: {
             Image(systemName: isExpanded ? "minus" : "xmark")
                 .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(.secondary)
-                .frame(width: 32, height: 28)
+                .foregroundStyle(isHovering ? .primary : .secondary)
+                .frame(
+                    width: CommandMenuChromeMetrics.controlWidth,
+                    height: CommandMenuChromeMetrics.controlHeight
+                )
         }
-        .buttonStyle(SettingsMenuButtonStyle(isHovering: isHovering))
+        .buttonStyle(CommandMenuChromeButtonStyle(isHovering: isHovering))
         .onHover { hovering in
-            isHovering = hovering
+            updateCommandMenuHoverState(hovering, state: $isHovering)
         }
         .help(isExpanded ? "Minimize" : "Close")
     }
@@ -967,12 +1452,15 @@ private struct CommandMenuPinButton: View {
         } label: {
             Image(systemName: isPinned ? "pin.fill" : "pin")
                 .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(isPinned ? .primary : .secondary)
-                .frame(width: 32, height: 28)
+                .foregroundStyle((isPinned || isHovering) ? .primary : .secondary)
+                .frame(
+                    width: CommandMenuChromeMetrics.controlWidth,
+                    height: CommandMenuChromeMetrics.controlHeight
+                )
         }
-        .buttonStyle(SettingsMenuButtonStyle(isHovering: isHovering))
+        .buttonStyle(CommandMenuChromeButtonStyle(isHovering: isHovering, isActive: isPinned))
         .onHover { hovering in
-            isHovering = hovering
+            updateCommandMenuHoverState(hovering, state: $isHovering)
         }
         .help(isPinned ? "Unpin (click outside will not dismiss)" : "Pin (keep open while clicking elsewhere)")
     }

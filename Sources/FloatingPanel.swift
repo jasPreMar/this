@@ -52,6 +52,8 @@ class FloatingPanel: NSPanel {
     private var taskIconLocalHoverMonitor: Any?
     private var taskIconAutoCollapseTimer: Timer?
     private var cancellables = Set<AnyCancellable>()
+    private var restoredTaskTitle: String?
+    private var restoredTaskSubtitle: String?
     private(set) var taskStartedAt: Date?
     private(set) var taskCompletedAt: Date?
     private(set) var taskLastActivityAt: Date?
@@ -81,13 +83,25 @@ class FloatingPanel: NSPanel {
     private var recentQuickActionInvocationSnapshot: ExternalFocusSnapshot?
 
     var taskDisplayTitle: String {
-        let fallback = searchViewModel.query.isEmpty ? "New task" : searchViewModel.query
-        return Self.normalizedContextText(searchViewModel.hoveredParts.last) ?? fallback
+        if let hoveredTitle = Self.normalizedContextText(searchViewModel.hoveredParts.last) {
+            return hoveredTitle
+        }
+
+        let typedTitle = searchViewModel.query.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !typedTitle.isEmpty {
+            return typedTitle
+        }
+
+        return restoredTaskTitle ?? "New task"
     }
 
     var taskDisplaySubtitle: String {
-        guard let firstPart = searchViewModel.hoveredParts.first else { return "" }
-        let subtitle = Self.normalizedContextText(firstPart) ?? ""
+        let subtitle: String
+        if let firstPart = searchViewModel.hoveredParts.first {
+            subtitle = Self.normalizedContextText(firstPart) ?? ""
+        } else {
+            subtitle = restoredTaskSubtitle ?? ""
+        }
         return subtitle == taskDisplayTitle ? "" : subtitle
     }
 
@@ -729,16 +743,28 @@ class FloatingPanel: NSPanel {
         return true
     }
 
-    func restoreHeadless(workingDirectoryURL: URL?) {
+    func restorePersistedSession(_ session: PersistedChatSession) {
         isTerminalMode = true
         isCursorFollowing = false
         removeAllMonitors()
-        beginPersistentTaskIfNeeded()
+        preservesTaskHistory = true
+        restoredTaskTitle = Self.normalizedContextText(session.title) ?? session.title
+        restoredTaskSubtitle = Self.normalizedContextText(session.subtitle) ?? session.subtitle
+        taskStartedAt = session.startedAt
+        taskCompletedAt = session.completedAt
+        taskLastActivityAt = session.lastActivityAt
 
         searchViewModel.query = ""
         searchViewModel.claudeManager = nil
         searchViewModel.isChatMode = true
-        searchViewModel.currentSessionWorkingDirectoryURL = workingDirectoryURL
+        searchViewModel.chatHistory = session.messages.map {
+            ChatMessage(role: $0.role, text: $0.text, structuredUI: $0.structuredUI)
+        }
+        searchViewModel.currentSessionId = session.sessionId
+        searchViewModel.currentSessionWorkingDirectoryURL = session.workingDirectoryPath.map {
+            URL(fileURLWithPath: $0)
+        }
+        searchViewModel.hasStartedClaudeConversation = session.sessionId != nil
     }
 
     // MARK: - Task Icon Mode

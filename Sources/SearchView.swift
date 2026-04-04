@@ -327,6 +327,7 @@ struct FocusedTextField: NSViewRepresentable {
     @Binding var textHeight: CGFloat
     var onSubmit: () -> Void
     var onKeyDown: ((NSEvent) -> Bool)? = nil
+    var onCommandSelector: ((Selector) -> Bool)? = nil
     var font: NSFont = .systemFont(ofSize: 13, weight: .regular)
     static let minWidth: CGFloat = 80
     static let maxWidth: CGFloat = 260
@@ -421,6 +422,7 @@ struct FocusedTextField: NSViewRepresentable {
             textHeight: $textHeight,
             onSubmit: onSubmit,
             onKeyDown: onKeyDown,
+            onCommandSelector: onCommandSelector,
             font: font
         )
     }
@@ -431,6 +433,7 @@ struct FocusedTextField: NSViewRepresentable {
         @Binding var textHeight: CGFloat
         let onSubmit: () -> Void
         let onKeyDown: ((NSEvent) -> Bool)?
+        let onCommandSelector: ((Selector) -> Bool)?
         let font: NSFont
         weak var textView: NSTextView?
         private weak var observedWindow: NSWindow?
@@ -442,6 +445,7 @@ struct FocusedTextField: NSViewRepresentable {
             textHeight: Binding<CGFloat>,
             onSubmit: @escaping () -> Void,
             onKeyDown: ((NSEvent) -> Bool)?,
+            onCommandSelector: ((Selector) -> Bool)?,
             font: NSFont
         ) {
             _text = text
@@ -449,6 +453,7 @@ struct FocusedTextField: NSViewRepresentable {
             _textHeight = textHeight
             self.onSubmit = onSubmit
             self.onKeyDown = onKeyDown
+            self.onCommandSelector = onCommandSelector
             self.font = font
         }
 
@@ -473,6 +478,13 @@ struct FocusedTextField: NSViewRepresentable {
         }
 
         func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+            if onCommandSelector?(commandSelector) == true {
+                return true
+            }
+            if let currentEvent = NSApp.currentEvent,
+               onKeyDown?(currentEvent) == true {
+                return true
+            }
             if commandSelector == #selector(NSResponder.insertNewline(_:)) {
                 onSubmit()
                 focusTextView()
