@@ -15,7 +15,6 @@ SKIP_BUILD=0
 SIGNING_HELPER="$ROOT_DIR/scripts/detect-signing-identity.sh"
 TEMP_DIR="$(mktemp -d)"
 STAGING_DIR="$TEMP_DIR/staging"
-RW_DMG_PATH="$TEMP_DIR/$APP_NAME-rw.dmg"
 
 cleanup() {
   rm -rf "$TEMP_DIR"
@@ -146,19 +145,13 @@ ln -s /Applications "$STAGING_DIR/Applications"
 rm -f "$DMG_PATH"
 
 hdiutil create \
-  -quiet \
+  -ov \
   -fs HFS+ \
   -volname "$VOLUME_NAME" \
   -srcfolder "$STAGING_DIR" \
-  -format UDRW \
-  "$RW_DMG_PATH"
-
-hdiutil convert \
-  -quiet \
-  "$RW_DMG_PATH" \
   -format UDZO \
   -imagekey zlib-level=9 \
-  -o "$DMG_PATH"
+  "$DMG_PATH"
 
 if [[ "$SIGN_MODE" == "developer-id" ]]; then
   if [[ -z "$SIGN_IDENTITY" ]]; then
