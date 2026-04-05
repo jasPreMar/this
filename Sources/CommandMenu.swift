@@ -1,6 +1,7 @@
 import AppKit
 import MarkdownUI
 import SwiftUI
+import ThisCore
 
 private enum CommandMenuChromeMetrics {
     static let controlWidth: CGFloat = 32
@@ -208,14 +209,262 @@ private struct CommandMenuScrollViewAccessor: NSViewRepresentable {
     }
 }
 
+private final class CommandMenuHeaderResizeDragView: NSView {
+    enum CursorMode {
+        case none
+        case hover
+        case dragging
+    }
+
+    var isEnabled = true {
+        didSet {
+            if !isEnabled {
+                dragStartY = nil
+                dragStartHeight = nil
+                onDragEnded?()
+                setCursorMode(.none)
+            }
+        }
+    }
+    var expectedSurfaceWidth: CGFloat = 720
+    var onDragChanged: ((CGFloat?, CGFloat) -> Void)?
+    var onDragEnded: (() -> Void)?
+    var onReset: (() -> Void)?
+
+    private var dragStartY: CGFloat?
+    private var dragStartHeight: CGFloat?
+    private var trackingArea: NSTrackingArea?
+    private var cursorMode: CursorMode = .none
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        layer?.backgroundColor = NSColor.clear.cgColor
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let trackingArea {
+            removeTrackingArea(trackingArea)
+        }
+        let trackingArea = NSTrackingArea(
+            rect: bounds,
+            options: [.activeAlways, .mouseEnteredAndExited, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(trackingArea)
+        self.trackingArea = trackingArea
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        guard isEnabled, dragStartY == nil else { return }
+        setCursorMode(.hover)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        guard dragStartY == nil else { return }
+        setCursorMode(.none)
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        guard isEnabled else { return }
+        if event.clickCount == 2 {
+            onReset?()
+            return
+        }
+
+        dragStartY = event.locationInWindow.y
+        dragStartHeight = currentSurfaceHeightFromHierarchy()
+        setCursorMode(.dragging)
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard let dragStartY else { return }
+        if dragStartHeight == nil {
+            dragStartHeight = currentSurfaceHeightFromHierarchy()
+        }
+        onDragChanged?(dragStartHeight, event.locationInWindow.y - dragStartY)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        guard dragStartY != nil else { return }
+        dragStartY = nil
+        dragStartHeight = nil
+        onDragEnded?()
+
+        let localPoint = convert(event.locationInWindow, from: nil)
+        setCursorMode(bounds.contains(localPoint) ? .hover : .none)
+    }
+
+    override func viewWillMove(toWindow newWindow: NSWindow?) {
+        if newWindow == nil {
+            dragStartY = nil
+            dragStartHeight = nil
+            onDragEnded?()
+            setCursorMode(.none)
+        }
+        super.viewWillMove(toWindow: newWindow)
+    }
+
+    private func currentSurfaceHeightFromHierarchy() -> CGFloat? {
+        var candidate = superview
+        var bestMatch: CGFloat = 0
+
+        while let view = candidate {
+            let size = view.bounds.size
+            if abs(size.width - expectedSurfaceWidth) <= 2, size.height > bestMatch {
+                bestMatch = size.height
+            }
+            candidate = view.superview
+        }
+
+        return bestMatch > 0 ? bestMatch : nil
+    }
+
+    private func setCursorMode(_ newMode: CursorMode) {
+        guard cursorMode != newMode else { return }
+        if cursorMode != .none {
+            NSCursor.pop()
+        }
+        cursorMode = newMode
+        switch newMode {
+        case .none:
+            break
+        case .hover:
+            NSCursor.openHand.push()
+        case .dragging:
+            NSCursor.closedHand.push()
+        }
+    }
+}
+
+private struct CommandMenuHeaderResizeArea: NSViewRepresentable {
+    let isEnabled: Bool
+    let surfaceWidth: CGFloat
+    let onDragChanged: (CGFloat?, CGFloat) -> Void
+    let onDragEnded: () -> Void
+    let onReset: () -> Void
+
+    func makeNSView(context: Context) -> CommandMenuHeaderResizeDragView {
+        let view = CommandMenuHeaderResizeDragView(frame: .zero)
+        view.expectedSurfaceWidth = surfaceWidth
+        view.onDragChanged = onDragChanged
+        view.onDragEnded = onDragEnded
+        view.onReset = onReset
+        view.isEnabled = isEnabled
+        return view
+    }
+
+    func updateNSView(_ nsView: CommandMenuHeaderResizeDragView, context: Context) {
+        nsView.expectedSurfaceWidth = surfaceWidth
+        nsView.onDragChanged = onDragChanged
+        nsView.onDragEnded = onDragEnded
+        nsView.onReset = onReset
+        nsView.isEnabled = isEnabled
+    }
+}
+
+private final class CommandMenuResizeHandleView: NSView {
+    weak var panel: CommandMenuPanel?
+
+    private var dragStartY: CGFloat?
+    private var trackingArea: NSTrackingArea?
+    private var isCursorActive = false
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        layer?.backgroundColor = NSColor.clear.cgColor
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let trackingArea {
+            removeTrackingArea(trackingArea)
+        }
+        let trackingArea = NSTrackingArea(
+            rect: bounds,
+            options: [.activeAlways, .mouseEnteredAndExited, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(trackingArea)
+        self.trackingArea = trackingArea
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        guard !isCursorActive else { return }
+        NSCursor.resizeUpDown.push()
+        isCursorActive = true
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        deactivateCursor()
+    }
+
+    override func viewWillMove(toWindow newWindow: NSWindow?) {
+        if newWindow == nil {
+            deactivateCursor()
+        }
+        super.viewWillMove(toWindow: newWindow)
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        if event.clickCount == 2 {
+            panel?.resetResizeHeight()
+            return
+        }
+
+        dragStartY = event.locationInWindow.y
+        panel?.beginResizeDrag()
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard let dragStartY else { return }
+        panel?.updateResizeDrag(deltaY: event.locationInWindow.y - dragStartY)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        dragStartY = nil
+        panel?.endResizeDrag()
+    }
+
+    private func deactivateCursor() {
+        guard isCursorActive else { return }
+        NSCursor.pop()
+        isCursorActive = false
+    }
+}
+
 final class CommandMenuPanel: NSPanel {
     var onEscape: (() -> Void)?
     var onClickOutsideContent: (() -> Void)?
     var onShortcut: ((NSEvent) -> Bool)?
     var isPinned = false
+    var isResizeEnabled = false {
+        didSet { passthrough?.isResizeEnabled = isResizeEnabled }
+    }
+    var onResizeDelta: ((CGFloat, CGFloat) -> Void)?
+    var onResetHeight: (() -> Void)?
 
     private var hostingView: NSHostingView<AnyView>?
     private var passthrough: CommandMenuPassthroughView?
+    private var resizeStartHeight: CGFloat?
 
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
@@ -256,6 +505,25 @@ final class CommandMenuPanel: NSPanel {
         passthrough?.contentFrame = rect
     }
 
+    func beginResizeDrag() {
+        resizeStartHeight = passthrough?.contentFrame.height
+    }
+
+    func updateResizeDrag(deltaY: CGFloat) {
+        let startHeight = resizeStartHeight ?? passthrough?.contentFrame.height ?? 0
+        guard startHeight > 0 else { return }
+        onResizeDelta?(startHeight, deltaY)
+    }
+
+    func endResizeDrag() {
+        resizeStartHeight = nil
+    }
+
+    func resetResizeHeight() {
+        resizeStartHeight = nil
+        onResetHeight?()
+    }
+
     private func installSurfaceIfNeeded() {
         guard let hostingView else { return }
 
@@ -275,6 +543,9 @@ final class CommandMenuPanel: NSPanel {
             hostingView.frame = passthrough?.bounds ?? .zero
         }
 
+        passthrough?.positionResizeHandle(above: hostingView)
+        passthrough?.isResizeEnabled = isResizeEnabled
+
         contentView = passthrough
     }
 }
@@ -283,7 +554,29 @@ final class CommandMenuPanel: NSPanel {
 /// they land outside the visible command-menu content area.
 private final class CommandMenuPassthroughView: NSView {
     weak var panel: CommandMenuPanel?
-    var contentFrame: CGRect = .zero
+    var contentFrame: CGRect = .zero {
+        didSet { updateResizeHandleFrame() }
+    }
+    var isResizeEnabled = false {
+        didSet { resizeHandleView.isHidden = !isResizeEnabled }
+    }
+
+    private let resizeHandleView = CommandMenuResizeHandleView(frame: .zero)
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        resizeHandleView.isHidden = true
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func layout() {
+        super.layout()
+        updateResizeHandleFrame()
+    }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
         // If the click is inside the content frame, do normal hit-testing
@@ -319,19 +612,43 @@ private final class CommandMenuPassthroughView: NSView {
         }
         return super.accessibilityHitTest(point)
     }
+
+    func positionResizeHandle(above hostingView: NSView) {
+        resizeHandleView.panel = panel
+        guard resizeHandleView.superview == nil else { return }
+        addSubview(resizeHandleView, positioned: .above, relativeTo: hostingView)
+        updateResizeHandleFrame()
+    }
+
+    private func updateResizeHandleFrame() {
+        resizeHandleView.frame = CGRect(
+            x: contentFrame.minX,
+            y: max(contentFrame.maxY - CommandMenuView.resizeHandleHeightValue, contentFrame.minY),
+            width: contentFrame.width,
+            height: min(CommandMenuView.resizeHandleHeightValue, contentFrame.height)
+        )
+    }
 }
 
 struct CommandMenuView: View {
     private static let panelWidth: CGFloat = 720
     private static let maxChatHeight: CGFloat = 500
     private static let fallbackBottomBarHeight: CGFloat = 48
+    private static let fallbackNonChatChromeHeight: CGFloat = 160
     private static let bottomMargin: CGFloat = 80
+    private static let minimumVisibleChatHeight: CGFloat = 120
+    static let resizeHandleHeightValue: CGFloat = 12
 
     @ObservedObject var appDelegate: AppDelegate
     let presentationID: UUID
     @State private var isContentVisible = false
     @State private var textWidth: CGFloat = FocusedTextField.minWidth
     @State private var textHeight: CGFloat = 20
+    @State private var contentFrame: CGRect = .zero
+    @State private var renderedSurfaceHeight: CGFloat = 0
+    @State private var renderedChatViewportHeight: CGFloat = 0
+    @State private var headerResizeStartHeight: CGFloat?
+    @State private var headerResizeLockedChromeHeight: CGFloat?
     @StateObject private var chatScrollController = CommandMenuChatScrollController()
 
     private var usesNativeGlassSurface: Bool {
@@ -363,6 +680,10 @@ struct CommandMenuView: View {
         appDelegate.commandMenuChatRecord
     }
 
+    private var hasLiveChat: Bool {
+        activeChatRecord != nil
+    }
+
     private var isDraftSelected: Bool {
         appDelegate.commandMenuShowingDraft
     }
@@ -372,51 +693,80 @@ struct CommandMenuView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            Spacer(minLength: 0)
+        GeometryReader { geometry in
+            let screenHeight = geometry.size.height
 
             VStack(spacing: 0) {
-                titleBar
+                Spacer(minLength: 0)
 
-                Divider()
-
-                headerRow
-
-                Divider()
-
-                if isExpanded {
-                    chatSection
+                VStack(spacing: 0) {
+                    titleBar(screenHeight: screenHeight)
 
                     Divider()
-                }
 
-                inputRow
-            }
-            .frame(width: Self.panelWidth)
-            .modifier(CommandMenuSurfaceChrome(usesNativeGlassSurface: usesNativeGlassSurface))
-            .shadow(color: .black.opacity(0.2), radius: 20, x: 0, y: 5)
-            .opacity(isContentVisible ? 1 : 0)
-            .blur(radius: isContentVisible ? 0 : 10)
-            .offset(y: isContentVisible ? 0 : 8)
-            .background(
-                GeometryReader { geometry in
-                    Color.clear.preference(
-                        key: CommandMenuContentFramePreferenceKey.self,
-                        value: geometry.frame(in: .global)
-                    )
+                    headerRow
+
+                    Divider()
+
+                    if isExpanded {
+                        chatSection(screenHeight: screenHeight)
+
+                        Divider()
+                    }
+
+                    inputRow
                 }
-            )
-            .padding(.bottom, Self.bottomMargin)
-            .animation(.easeInOut(duration: 0.25), value: isExpanded)
+                .frame(width: Self.panelWidth, height: resolvedManualTotalHeight(screenHeight: screenHeight))
+                .modifier(CommandMenuSurfaceChrome(usesNativeGlassSurface: usesNativeGlassSurface))
+                .shadow(color: .black.opacity(0.2), radius: 20, x: 0, y: 5)
+                .opacity(isContentVisible ? 1 : 0)
+                .blur(radius: isContentVisible ? 0 : 10)
+                .offset(y: isContentVisible ? 0 : 8)
+                .background(
+                    GeometryReader { geometry in
+                        Color.clear
+                            .preference(
+                                key: CommandMenuContentFramePreferenceKey.self,
+                                value: geometry.frame(in: .global)
+                            )
+                            .preference(
+                                key: CommandMenuSurfaceHeightPreferenceKey.self,
+                                value: geometry.size.height
+                            )
+                    }
+                )
+                .padding(.bottom, Self.bottomMargin)
+                .animation(.easeInOut(duration: 0.25), value: isExpanded)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
         }
         .id(presentationID)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onPreferenceChange(CommandMenuContentFramePreferenceKey.self) { frame in
+            guard frame.width > 0, frame.height > 0 else { return }
+            contentFrame = frame
             appDelegate.updateCommandMenuContentFrame(frame)
+        }
+        .onPreferenceChange(CommandMenuSurfaceHeightPreferenceKey.self) { height in
+            guard height > 0 else { return }
+            renderedSurfaceHeight = height
+        }
+        .onPreferenceChange(CommandMenuChatViewportHeightPreferenceKey.self) { height in
+            guard height > 0 else { return }
+            renderedChatViewportHeight = height
+            appDelegate.updateCommandMenuChatViewportHeight(height)
         }
         .onAppear {
             withAnimation(.easeOut(duration: 0.25)) {
                 isContentVisible = true
+            }
+        }
+        .onChange(of: hasLiveChat) { _, hasLiveChat in
+            if !hasLiveChat {
+                contentFrame = .zero
+                renderedSurfaceHeight = 0
+                renderedChatViewportHeight = 0
+                appDelegate.updateCommandMenuChatViewportHeight(0)
             }
         }
         .onChange(of: appDelegate.commandMenuDismissing) { _, dismissing in
@@ -424,10 +774,16 @@ struct CommandMenuView: View {
             withAnimation(.easeIn(duration: 0.2)) {
                 isContentVisible = false
             }
+            clearHeaderResizeSession()
+        }
+        .onChange(of: canResizeFromHeader) { _, canResize in
+            if !canResize {
+                clearHeaderResizeSession()
+            }
         }
     }
 
-    private var titleBar: some View {
+    private func titleBar(screenHeight: CGFloat) -> some View {
         HStack(spacing: 0) {
             SettingsMenuButton(
                 onCheckForUpdates: { appDelegate.checkForUpdatesFromCommandMenu() },
@@ -437,10 +793,18 @@ struct CommandMenuView: View {
             )
             .padding(.leading, CommandMenuChromeMetrics.edgePadding)
 
-            Spacer(minLength: 0)
+            if canResizeFromHeader {
+                headerResizeArea(screenHeight: screenHeight)
+            } else {
+                Spacer(minLength: 0)
+            }
 
             HStack(spacing: 1) {
                 CommandMenuPinButton(isPinned: $appDelegate.commandMenuPinned)
+
+                if shouldShowHeightResetControl {
+                    CommandMenuResetHeightButton(onReset: resetPinnedHeightMode)
+                }
 
                 CommandMenuMinimizeCloseButton(
                     isExpanded: isExpanded,
@@ -454,6 +818,27 @@ struct CommandMenuView: View {
         }
         .frame(height: Self.fallbackBottomBarHeight)
         .background(Color.black.opacity(0.035))
+    }
+
+    private func headerResizeArea(screenHeight: CGFloat) -> some View {
+        CommandMenuHeaderResizeArea(
+            isEnabled: canResizeFromHeader,
+            surfaceWidth: Self.panelWidth,
+            onDragChanged: { startHeight, deltaY in
+                updatePinnedHeightFromHeaderDrag(
+                    startHeight: startHeight,
+                    deltaY: deltaY,
+                    screenHeight: screenHeight
+                )
+            },
+            onDragEnded: {
+                clearHeaderResizeSession()
+            },
+            onReset: {
+                resetPinnedHeightMode()
+            }
+        )
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var headerRow: some View {
@@ -504,12 +889,13 @@ struct CommandMenuView: View {
     }
 
     @ViewBuilder
-    private var chatSection: some View {
+    private func chatSection(screenHeight: CGFloat) -> some View {
         if let chatRecord = activeChatRecord,
            let viewModel = chatRecord.panel?.searchViewModel {
             CommandMenuChatSection(
                 viewModel: viewModel,
-                scrollController: chatScrollController
+                scrollController: chatScrollController,
+                manualViewportHeight: manualChatViewportHeight(screenHeight: screenHeight)
             )
             .id(chatRecord.id)
             .clipped()
@@ -870,6 +1256,103 @@ struct CommandMenuView: View {
         appDelegate.stopAllRunningTaskRecords()
     }
 
+    private var shouldShowHeightResetControl: Bool {
+        shouldShowCommandMenuHeightResetControl(
+            isPinned: appDelegate.commandMenuPinned,
+            hasLiveChat: hasLiveChat,
+            heightMode: appDelegate.commandMenuPinnedHeightMode,
+            isCommandMenuDismissing: appDelegate.commandMenuDismissing
+        )
+    }
+
+    private var canResizeFromHeader: Bool {
+        canResizePinnedCommandMenuHeight(
+            isPinned: appDelegate.commandMenuPinned,
+            hasLiveChat: hasLiveChat,
+            isCommandMenuDismissing: appDelegate.commandMenuDismissing
+        )
+    }
+
+    private var effectiveManualChromeHeight: CGFloat {
+        headerResizeLockedChromeHeight ?? measuredNonChatChromeHeight
+    }
+
+    private var measuredNonChatChromeHeight: CGFloat {
+        guard hasLiveChat,
+              contentFrame.height > 0,
+              renderedChatViewportHeight > 0 else {
+            return Self.fallbackNonChatChromeHeight
+        }
+
+        return max(contentFrame.height - renderedChatViewportHeight, Self.fallbackNonChatChromeHeight)
+    }
+
+    private func manualHeightBounds(screenHeight: CGFloat) -> CommandMenuManualHeightBounds {
+        commandMenuManualHeightBounds(
+            screenHeight: screenHeight,
+            bottomMargin: Self.bottomMargin,
+            chromeHeight: effectiveManualChromeHeight,
+            minimumVisibleChatHeight: Self.minimumVisibleChatHeight
+        )
+    }
+
+    private func resolvedManualTotalHeight(screenHeight: CGFloat) -> CGFloat? {
+        guard appDelegate.commandMenuPinned, hasLiveChat else { return nil }
+        guard case let .manual(totalHeight) = appDelegate.commandMenuPinnedHeightMode else { return nil }
+
+        return clampedCommandMenuManualHeight(
+            totalHeight,
+            bounds: manualHeightBounds(screenHeight: screenHeight)
+        )
+    }
+
+    private func manualChatViewportHeight(screenHeight: CGFloat) -> CGFloat? {
+        guard let totalHeight = resolvedManualTotalHeight(screenHeight: screenHeight) else { return nil }
+        return max(totalHeight - effectiveManualChromeHeight, Self.minimumVisibleChatHeight)
+    }
+
+    private func currentSurfaceHeight(screenHeight: CGFloat) -> CGFloat? {
+        if let manualHeight = resolvedManualTotalHeight(screenHeight: screenHeight) {
+            return manualHeight
+        }
+
+        return commandMenuStartingSurfaceHeight(
+            reportedTotalHeight: max(renderedSurfaceHeight, contentFrame.height),
+            chromeHeight: effectiveManualChromeHeight,
+            chatViewportHeight: renderedChatViewportHeight
+        )
+    }
+
+    private func updatePinnedHeightFromHeaderDrag(
+        startHeight: CGFloat?,
+        deltaY: CGFloat,
+        screenHeight: CGFloat
+    ) {
+        if headerResizeStartHeight == nil {
+            headerResizeLockedChromeHeight = measuredNonChatChromeHeight
+            headerResizeStartHeight = startHeight ?? currentSurfaceHeight(screenHeight: screenHeight)
+        }
+
+        guard let headerResizeStartHeight else { return }
+
+        let nextHeight = commandMenuManualHeightAfterDrag(
+            startHeight: headerResizeStartHeight,
+            dragDeltaY: deltaY,
+            bounds: manualHeightBounds(screenHeight: screenHeight)
+        )
+        appDelegate.commandMenuPinnedHeightMode = .manual(totalHeight: nextHeight)
+    }
+
+    private func clearHeaderResizeSession() {
+        headerResizeStartHeight = nil
+        headerResizeLockedChromeHeight = nil
+    }
+
+    private func resetPinnedHeightMode() {
+        clearHeaderResizeSession()
+        appDelegate.commandMenuPinnedHeightMode = .automatic
+    }
+
 }
 
 private struct CommandMenuSurfaceChrome: ViewModifier {
@@ -895,8 +1378,17 @@ private struct CommandMenuSurfaceChrome: ViewModifier {
 private struct CommandMenuChatSection: View {
     @ObservedObject var viewModel: SearchViewModel
     @ObservedObject var scrollController: CommandMenuChatScrollController
+    let manualViewportHeight: CGFloat?
     @State private var scrollContentHeight: CGFloat = 0
     private let maxScrollAreaHeight: CGFloat = 500
+
+    private var resolvedViewportHeight: CGFloat {
+        if let manualViewportHeight {
+            return manualViewportHeight
+        }
+
+        return min(max(scrollContentHeight + 16, 60), maxScrollAreaHeight)
+    }
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -919,7 +1411,15 @@ private struct CommandMenuChatSection: View {
                     }
                 )
             }
-            .frame(height: min(max(scrollContentHeight + 16, 60), maxScrollAreaHeight))
+            .frame(height: resolvedViewportHeight)
+            .background(
+                GeometryReader { geometry in
+                    Color.clear.preference(
+                        key: CommandMenuChatViewportHeightPreferenceKey.self,
+                        value: geometry.size.height
+                    )
+                }
+            )
             .onAppear {
                 forceScrollToBottom(proxy, animated: false)
             }
@@ -1118,6 +1618,14 @@ private struct CommandMenuChatContentHeightPreferenceKey: PreferenceKey {
 
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
         value = max(value, nextValue())
+    }
+}
+
+private struct CommandMenuChatViewportHeightPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
     }
 }
 
@@ -1412,6 +1920,14 @@ private struct CommandMenuContentFramePreferenceKey: PreferenceKey {
     }
 }
 
+private struct CommandMenuSurfaceHeightPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
 private struct CommandMenuMinimizeCloseButton: View {
     let isExpanded: Bool
     let onMinimize: () -> Void
@@ -1462,7 +1978,33 @@ private struct CommandMenuPinButton: View {
         .onHover { hovering in
             updateCommandMenuHoverState(hovering, state: $isHovering)
         }
-        .help(isPinned ? "Unpin (click outside will not dismiss)" : "Pin (keep open while clicking elsewhere)")
+        .help(
+            isPinned
+                ? "Unpin (outside clicks or Space switches will dismiss)"
+                : "Pin (keep open across outside clicks and Space switches)"
+        )
+    }
+}
+
+private struct CommandMenuResetHeightButton: View {
+    let onReset: () -> Void
+    @State private var isHovering = false
+
+    var body: some View {
+        Button(action: onReset) {
+            Image(systemName: "rectangle.expand.vertical")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(isHovering ? .primary : .secondary)
+                .frame(
+                    width: CommandMenuChromeMetrics.controlWidth,
+                    height: CommandMenuChromeMetrics.controlHeight
+                )
+        }
+        .buttonStyle(CommandMenuChromeButtonStyle(isHovering: isHovering))
+        .onHover { hovering in
+            updateCommandMenuHoverState(hovering, state: $isHovering)
+        }
+        .help("Reset height")
     }
 }
 

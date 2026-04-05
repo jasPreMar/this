@@ -437,6 +437,186 @@ func testAssistantResponseDirectives() {
     ), "visibleCommandMenuDoesNotMarkTaskEligibleForReveal")
 }
 
+// ─── Command Menu Presentation Policy Tests ──────────────────────────
+
+func testCommandMenuPresentationPolicy() {
+    assert(
+        commandMenuSpaceAffinity(isPinned: false) == .currentSpaceOnly,
+        "unpinnedCommandMenuUsesCurrentSpaceOnly"
+    )
+    assert(
+        commandMenuSpaceAffinity(isPinned: true) == .allSpaces,
+        "pinnedCommandMenuUsesAllSpaces"
+    )
+
+    assert(
+        shouldDismissCommandMenuOnActiveSpaceChange(
+            isPinned: false,
+            isCommandMenuVisible: true,
+            isCommandMenuDismissing: false
+        ),
+        "activeSpaceChangeDismissesVisibleUnpinnedMenu"
+    )
+    assert(
+        !shouldDismissCommandMenuOnActiveSpaceChange(
+            isPinned: true,
+            isCommandMenuVisible: true,
+            isCommandMenuDismissing: false
+        ),
+        "activeSpaceChangeDoesNotDismissPinnedMenu"
+    )
+    assert(
+        !shouldDismissCommandMenuOnActiveSpaceChange(
+            isPinned: false,
+            isCommandMenuVisible: false,
+            isCommandMenuDismissing: false
+        ),
+        "activeSpaceChangeIgnoresHiddenMenu"
+    )
+    assert(
+        !shouldDismissCommandMenuOnActiveSpaceChange(
+            isPinned: false,
+            isCommandMenuVisible: true,
+            isCommandMenuDismissing: true
+        ),
+        "activeSpaceChangeIgnoresAlreadyDismissingMenu"
+    )
+
+    let bounds = commandMenuManualHeightBounds(
+        screenHeight: 900,
+        bottomMargin: 80,
+        chromeHeight: 210,
+        minimumVisibleChatHeight: 120
+    )
+    assert(bounds == CommandMenuManualHeightBounds(
+        minimumTotalHeight: 330,
+        maximumTotalHeight: 740
+    ), "commandMenuHeightBoundsUseScreenChromeAndChatMinimums")
+
+    assert(
+        clampedCommandMenuManualHeight(280, bounds: bounds) == 330,
+        "commandMenuHeightClampHonorsMinimum"
+    )
+    assert(
+        clampedCommandMenuManualHeight(500, bounds: bounds) == 500,
+        "commandMenuHeightClampKeepsInRangeValues"
+    )
+    assert(
+        clampedCommandMenuManualHeight(800, bounds: bounds) == 740,
+        "commandMenuHeightClampHonorsMaximum"
+    )
+    assert(
+        commandMenuManualHeightAfterDrag(
+            startHeight: 500,
+            dragDeltaY: 120,
+            bounds: bounds
+        ) == 620,
+        "draggingHeaderUpIncreasesHeightOneToOne"
+    )
+    assert(
+        commandMenuManualHeightAfterDrag(
+            startHeight: 500,
+            dragDeltaY: -90,
+            bounds: bounds
+        ) == 410,
+        "draggingHeaderDownDecreasesHeightOneToOne"
+    )
+    assert(
+        commandMenuStartingSurfaceHeight(
+            reportedTotalHeight: 0,
+            chromeHeight: 160,
+            chatViewportHeight: 420
+        ) == 580,
+        "startingSurfaceHeightUsesMeasuredViewportWhenTotalFrameIsUnavailable"
+    )
+    assert(
+        commandMenuStartingSurfaceHeight(
+            reportedTotalHeight: 640,
+            chromeHeight: 160,
+            chatViewportHeight: 420
+        ) == 640,
+        "startingSurfaceHeightPrefersReportedTotalHeight"
+    )
+    assert(
+        commandMenuStartingSurfaceHeight(
+            reportedTotalHeight: 0,
+            chromeHeight: 160,
+            chatViewportHeight: 0
+        ) == nil,
+        "startingSurfaceHeightWaitsForRealMeasurementsInsteadOfUsingMinimumFallback"
+    )
+
+    assert(
+        commandMenuPinnedHeightModeAfterPinChange(.manual(totalHeight: 480), isPinned: false) == .automatic,
+        "turningPinOffClearsManualHeightMode"
+    )
+    assert(
+        commandMenuPinnedHeightModeAfterPinChange(.manual(totalHeight: 480), isPinned: true) == .manual(totalHeight: 480),
+        "keepingPinOnPreservesManualHeightMode"
+    )
+
+    assert(
+        canResizePinnedCommandMenuHeight(
+            isPinned: true,
+            hasLiveChat: true,
+            isCommandMenuDismissing: false
+        ),
+        "pinnedLiveChatCanResizeHeight"
+    )
+    assert(
+        !canResizePinnedCommandMenuHeight(
+            isPinned: false,
+            hasLiveChat: true,
+            isCommandMenuDismissing: false
+        ),
+        "unpinnedMenuCannotResizeHeight"
+    )
+    assert(
+        !canResizePinnedCommandMenuHeight(
+            isPinned: true,
+            hasLiveChat: false,
+            isCommandMenuDismissing: false
+        ),
+        "draftOrMinimizedMenuCannotResizeHeight"
+    )
+    assert(
+        !canResizePinnedCommandMenuHeight(
+            isPinned: true,
+            hasLiveChat: true,
+            isCommandMenuDismissing: true
+        ),
+        "dismissingMenuCannotResizeHeight"
+    )
+
+    assert(
+        shouldShowCommandMenuHeightResetControl(
+            isPinned: true,
+            hasLiveChat: true,
+            heightMode: .manual(totalHeight: 500),
+            isCommandMenuDismissing: false
+        ),
+        "manualPinnedLiveChatShowsResetControl"
+    )
+    assert(
+        !shouldShowCommandMenuHeightResetControl(
+            isPinned: true,
+            hasLiveChat: true,
+            heightMode: .automatic,
+            isCommandMenuDismissing: false
+        ),
+        "automaticHeightHidesResetControl"
+    )
+    assert(
+        !shouldShowCommandMenuHeightResetControl(
+            isPinned: true,
+            hasLiveChat: false,
+            heightMode: .manual(totalHeight: 500),
+            isCommandMenuDismissing: false
+        ),
+        "draftOrMinimizedStateHidesResetControl"
+    )
+}
+
 // ─── Entry Point ─────────────────────────────────────────────────────
 
 func output(_ s: String) {
@@ -455,6 +635,7 @@ struct RegressionTests {
         testFastCommandRouter()
         testPanelInvocationPolicy()
         testAssistantResponseDirectives()
+        testCommandMenuPresentationPolicy()
 
         output("")
         output("━━━ Regression Tests ━━━")
