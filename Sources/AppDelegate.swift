@@ -566,12 +566,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         switch event.type {
         case .rightMouseUp:
             closeCommandMenu()
-            if let legacyStatusMenu, let button = statusItem?.button {
-                legacyStatusMenu.popUp(
-                    positioning: nil,
-                    at: NSPoint(x: 0, y: button.bounds.height + 6),
-                    in: button
-                )
+            if let legacyStatusMenu {
+                legacyStatusMenu.delegate = self
+                statusItem?.menu = legacyStatusMenu
+                statusItem?.button?.performClick(nil)
             }
         default:
             toggleCommandMenu(from: .statusItem)
@@ -2026,6 +2024,15 @@ extension AppDelegate: SPUUpdaterDelegate {
         let version = item.displayVersionString
         DispatchQueue.main.async { [weak self] in
             self?.showUpdateBadge(version: version)
+        }
+    }
+}
+
+extension AppDelegate: NSMenuDelegate {
+    func menuDidClose(_ menu: NSMenu) {
+        if menu === legacyStatusMenu {
+            statusItem?.menu = nil
+            menu.delegate = nil
         }
     }
 }
