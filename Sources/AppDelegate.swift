@@ -10,6 +10,11 @@ import WebKit
 private weak var sharedAppDelegate: AppDelegate?
 
 private let commandMenuHotKeySignature: OSType = 0x48505452 // 'HPTR'
+private enum CommandMenuResizeMetrics {
+    static let bottomMargin: CGFloat = 80
+    static let minimumVisibleChatHeight: CGFloat = 120
+    static let fallbackNonChatChromeHeight: CGFloat = 160
+}
 
 // CGEventTap callback — must be a free function (no closures allowed)
 private func rightClickCallback(
@@ -148,6 +153,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     private var commandMenuCloseWorkItem: DispatchWorkItem?
     private var commandMenuGlobalMouseMonitor: Any?
     private var commandMenuLocalMouseMonitor: Any?
+    private var commandMenuSpaceChangeObserver: NSObjectProtocol?
     private var onboardingWindow: NSWindow?
     private var settingsWindow: NSWindow?
     private var panelsEligibleForClosedCommandMenuReveal: Set<ObjectIdentifier> = []
@@ -176,14 +182,20 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     private var recentlyClosedTasks: [RecentlyClosedTask] = []
     @Published var commandMenuVoiceState: SearchViewModel.VoiceState = .idle
     @Published var commandMenuVoiceLevel: CGFloat = 0
-    @Published var commandMenuChatRecord: TaskSessionRecord?
+    @Published var commandMenuChatRecord: TaskSessionRecord? {
+        didSet { syncCommandMenuPanelResizeState() }
+    }
     @Published var commandMenuShowingDraft = false
-    @Published var commandMenuDismissing = false
+    @Published var commandMenuDismissing = false {
+        didSet { syncCommandMenuPanelResizeState() }
+    }
     @Published var commandMenuQuery = ""
     @Published var commandMenuPinned = false {
-        didSet { commandMenuPanel?.isPinned = commandMenuPinned }
+        didSet { syncCommandMenuPanelPresentation() }
     }
+    @Published var commandMenuPinnedHeightMode: CommandMenuPinnedHeightMode = .automatic
     private var rememberedCommandMenuChatRecordID: TaskSessionRecord.ID?
+    private var commandMenuChatViewportHeight: CGFloat = 0
     private lazy var ghostCursorStore = GhostCursorStore(playClickSound: { [weak self] in
         self?.soundPlayer.playGhostCursorClick()
     })
@@ -204,6 +216,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         ghostCursorOverlayCoordinator = GhostCursorOverlayCoordinator(store: ghostCursorStore)
         highlightOverlayCoordinator = HighlightOverlayCoordinator(store: highlightOverlayStore)
         setupGhostCursorWorkspaceObservers()
+        setupCommandMenuSpaceChangeObserver()
         setupMainMenu()
         updaterController = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: self, userDriverDelegate: nil)
         setupStatusItem()
@@ -776,8 +789,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         .floating
     }
 
-    private func commandMenuCollectionBehavior(for source: CommandMenuPresentationSource) -> NSWindow.CollectionBehavior {
-        [.canJoinAllSpaces, .fullScreenAuxiliary]
+    private func commandMenuCollectionBehavior() -> NSWindow.CollectionBehavior {
+        switch commandMenuSpaceAffinity(isPinned: commandMenuPinned) {
+        case .currentSpaceOnly:
+            return [.fullScreenAuxiliary]
+        case .allSpaces:
+            return [.canJoinAllSpaces, .fullScreenAuxiliary]
+        }
     }
 
     private func showCommandMenu(from source: CommandMenuPresentationSource, navigateToChat: TaskSessionRecord? = nil) {
@@ -804,7 +822,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             panel.isOpaque = false
             panel.backgroundColor = .clear
             panel.hasShadow = false
-            panel.collectionBehavior = commandMenuCollectionBehavior(for: source)
+            panel.collectionBehavior = commandMenuCollectionBehavior()
             panel.isReleasedWhenClosed = false
             panel.onEscape = { [weak self] in
                 self?.handleCommandMenuEscape()
@@ -822,9 +840,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             dismissCommandKeyPanelForCommandMenu()
         }
 
-        commandMenuPanel?.isPinned = commandMenuPinned
+        syncCommandMenuPanelPresentation()
         commandMenuPanel?.level = commandMenuLevel(for: source)
-        commandMenuPanel?.collectionBehavior = commandMenuCollectionBehavior(for: source)
         commandMenuPanel?.setRootView(
             CommandMenuView(
                 appDelegate: self,
@@ -854,6 +871,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             height: frame.height
         )
         panel.updateContentFrame(contentInWindow)
+    }
+
+    func updateCommandMenuChatViewportHeight(_ height: CGFloat) {
+        commandMenuChatViewportHeight = height
+        syncCommandMenuPanelResizeState()
     }
 
     private func commandMenuTargetScreen(for source: CommandMenuPresentationSource) -> NSScreen? {
@@ -915,6 +937,49 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     private func statusButtonScreenRect() -> NSRect? {
         guard let buttonWindow = statusItem?.button?.window else { return nil }
         return buttonWindow.frame
+    }
+
+    private func syncCommandMenuPanelPresentation() {
+        commandMenuPinnedHeightMode = commandMenuPinnedHeightModeAfterPinChange(
+            commandMenuPinnedHeightMode,
+            isPinned: commandMenuPinned
+        )
+        guard let commandMenuPanel else { return }
+        commandMenuPanel.isPinned = commandMenuPinned
+        commandMenuPanel.collectionBehavior = commandMenuCollectionBehavior()
+        syncCommandMenuPanelResizeState()
+    }
+
+    private func syncCommandMenuPanelResizeState() {
+        guard let commandMenuPanel else { return }
+
+        // Header-driven resize now lives entirely inside SwiftUI's title bar.
+        commandMenuPanel.isResizeEnabled = false
+        commandMenuPanel.onResizeDelta = nil
+        commandMenuPanel.onResetHeight = nil
+    }
+
+    private func setupCommandMenuSpaceChangeObserver() {
+        let notificationCenter = NSWorkspace.shared.notificationCenter
+        commandMenuSpaceChangeObserver = notificationCenter.addObserver(
+            forName: NSWorkspace.activeSpaceDidChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.handleCommandMenuActiveSpaceChange()
+        }
+    }
+
+    private func handleCommandMenuActiveSpaceChange() {
+        guard shouldDismissCommandMenuOnActiveSpaceChange(
+            isPinned: commandMenuPinned,
+            isCommandMenuVisible: commandMenuPanel?.isVisible == true,
+            isCommandMenuDismissing: commandMenuDismissing
+        ) else {
+            return
+        }
+
+        closeCommandMenu()
     }
 
     private func refreshApplicationPresentation() {
