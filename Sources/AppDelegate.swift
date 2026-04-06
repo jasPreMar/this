@@ -1435,7 +1435,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     }
 
     func reopenRememberedOrLatestTaskRecord() {
-        if let record = resolvedCommandMenuChatRecord(preferred: nil) ?? taskRecords.last {
+        if let record = resolvedCommandMenuChatRecord(preferred: nil) ?? taskRecords.first {
             openTaskRecord(record)
         }
     }
@@ -1496,7 +1496,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         let record = TaskSessionRecord(panel: panel)
         record.persistedSessionId = panel.persistedSessionId
         taskRecordLookup[key] = record
-        taskRecords.append(record)
+        taskRecords.insert(record, at: 0)
     }
 
     private func syncTaskRecord(for panel: FloatingPanel) {
@@ -1537,8 +1537,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             let record = TaskSessionRecord(persisted: session)
             taskRecords.append(record)
         }
-        // Sort once on load: oldest first (leftmost), newest last (rightmost).
-        taskRecords.sort { $0.startedAt < $1.startedAt }
+        // Sort once on load: newest first (leftmost), oldest last (rightmost).
+        taskRecords.sort { $0.startedAt > $1.startedAt }
     }
 
     private func markPanelEligibleForClosedCommandMenuReveal(_ panel: FloatingPanel) {

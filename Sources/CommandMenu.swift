@@ -843,6 +843,12 @@ struct CommandMenuView: View {
 
     private var headerRow: some View {
         HStack(spacing: CommandMenuChromeMetrics.tabSpacing) {
+            CommandMenuNewTabButton(
+                isSelected: isDraftSelected,
+                action: { openNewTab() }
+            )
+            .padding(.leading, CommandMenuChromeMetrics.edgePadding)
+
             ScrollViewReader { proxy in
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: CommandMenuChromeMetrics.tabSpacing) {
@@ -856,7 +862,7 @@ struct CommandMenuView: View {
                             .id(task.id)
                         }
                     }
-                    .padding(.leading, CommandMenuChromeMetrics.edgePadding)
+                    .padding(.trailing, CommandMenuChromeMetrics.edgePadding)
                     .padding(.vertical, 8)
                 }
                 .onAppear {
@@ -871,20 +877,14 @@ struct CommandMenuView: View {
                     }
                 }
             }
-
-            CommandMenuNewTabButton(
-                isSelected: isDraftSelected,
-                action: { openNewTab() }
-            )
-            .padding(.trailing, CommandMenuChromeMetrics.edgePadding)
         }
     }
 
     private func scrollTabStripToInitialPosition(_ proxy: ScrollViewProxy) {
         if let activeID = activeChatRecord?.id {
             proxy.scrollTo(activeID, anchor: .center)
-        } else if let latestID = tabs.last?.id {
-            proxy.scrollTo(latestID, anchor: .trailing)
+        } else if let latestID = tabs.first?.id {
+            proxy.scrollTo(latestID, anchor: .leading)
         }
     }
 
@@ -926,8 +926,8 @@ struct CommandMenuView: View {
         guard !tabs.isEmpty else { return }
         guard let currentID = activeChatRecord?.id ?? appDelegate.commandMenuTabNavigationAnchorID(),
               let currentIndex = tabs.firstIndex(where: { $0.id == currentID }) else {
-            if let last = tabs.last {
-                appDelegate.openTaskRecord(last)
+            if let first = tabs.first {
+                appDelegate.openTaskRecord(first)
             }
             return
         }
