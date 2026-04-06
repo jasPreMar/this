@@ -22,6 +22,8 @@ struct PersistedChatSession: Codable {
     var completedAt: Date?
     var lastActivityAt: Date
     var workingDirectoryPath: String?
+    var iconPNGData: Data?
+    var isUnread: Bool?
 }
 
 final class ChatSessionStore {

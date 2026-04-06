@@ -9,6 +9,7 @@ private enum CommandMenuChromeMetrics {
     static let edgePadding: CGFloat = 8
     static let tabSpacing: CGFloat = 1
     static let tabCornerRadius: CGFloat = 8
+    static let tabWidth: CGFloat = 160
     static let hoverFadeOutDuration = 0.1
 }
 
@@ -1575,8 +1576,8 @@ private struct CommandMenuTabButton: View {
                             .frame(width: 6, height: 6)
                     }
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
 
@@ -1602,6 +1603,7 @@ private struct CommandMenuTabButton: View {
         .padding(.leading, 10)
         .padding(.trailing, 6)
         .padding(.vertical, 6)
+        .frame(maxWidth: CommandMenuChromeMetrics.tabWidth)
         .background(
             RoundedRectangle(cornerRadius: CommandMenuChromeMetrics.tabCornerRadius, style: .continuous)
                 .fill(Color.black.opacity(backgroundOpacity))
