@@ -90,10 +90,17 @@ struct SearchView: View {
         }
     }
 
+    private var fullPanelWidth: CGFloat {
+        if viewModel.isCommandKeyMode {
+            return !viewModel.objectTextEnabled ? 44 : 168
+        }
+        return 320
+    }
+
     private var fullPanel: some View {
         PanelSurface(
-            minWidth: viewModel.isCommandKeyMode ? 168 : 320,
-            maxWidth: viewModel.isCommandKeyMode ? 168 : 320
+            minWidth: fullPanelWidth,
+            maxWidth: fullPanelWidth
         ) {
             VStack(alignment: .leading, spacing: 0) {
                 PanelHeaderSection(viewModel: viewModel)
@@ -146,7 +153,7 @@ struct PanelSurface<Content: View>: View {
     }
 }
 
-private struct PanelChrome<Content: View>: View {
+struct PanelChrome<Content: View>: View {
     let cornerRadius: CGFloat
     let usesNativeGlassSurface: Bool
     let content: Content
@@ -230,8 +237,6 @@ struct PanelHeaderSection<Accessory: View>: View {
                             text: visiblePart,
                             appIcon: viewModel.hoveredContextIcon,
                             contextText: viewModel.hoveredParts.first,
-                            voiceState: viewModel.voiceState,
-                            voiceLevel: viewModel.voiceLevel,
                             showsCloseButtonOnHover: showsCloseButtonOnHover,
                             onClose: onClose
                         )
@@ -241,34 +246,22 @@ struct PanelHeaderSection<Accessory: View>: View {
                     .padding(.horizontal, 10)
                     .padding(.vertical, 8)
                 }
-            }
-
-            if viewModel.isVoiceModeActive, (!viewModel.objectTextEnabled || viewModel.hoveredParts.last == nil) {
-                HStack(spacing: 8) {
-                    Image(systemName: "mic.fill")
-                        .font(.system(size: 11))
-                        .foregroundColor(.secondary)
-                        .frame(width: 16, alignment: .center)
-
-                    Group {
-                        switch viewModel.voiceState {
-                        case .listening, .idle, .failed:
-                            EmptyView()
-                        case .transcribing:
-                            Text("Transcribing...")
-                                .font(.system(size: 13))
-                                .foregroundColor(.secondary)
-                        }
+            } else if viewModel.hoveredContextIcon != nil {
+                HStack(spacing: 7) {
+                    if let appIcon = viewModel.hoveredContextIcon {
+                        Image(nsImage: appIcon)
+                            .resizable()
+                            .interpolation(.high)
+                            .scaledToFit()
+                            .frame(width: 16, height: 16)
+                            .clipShape(RoundedRectangle(cornerRadius: 4))
                     }
-
-                    Spacer(minLength: 8)
-                    VoiceTrailingIndicator(state: viewModel.voiceState, level: viewModel.voiceLevel)
                     accessory
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 10)
-                .padding(.vertical, 6)
+                .padding(.vertical, 8)
             }
+
         }
     }
 }
@@ -295,9 +288,6 @@ struct PanelInputRow: View {
             )
             .frame(width: expandsTextField ? nil : textWidth, height: textHeight)
             .frame(maxWidth: expandsTextField ? .infinity : nil, alignment: .leading)
-
-            VoiceTrailingIndicator(state: viewModel.voiceState, level: viewModel.voiceLevel)
-                .padding(.top, 1)
 
             if let manager = viewModel.claudeManager,
                manager.status.isActive {
@@ -558,8 +548,6 @@ struct ContextSummaryView: View {
     let text: String
     let appIcon: NSImage?
     let contextText: String?
-    let voiceState: SearchViewModel.VoiceState
-    let voiceLevel: CGFloat
     let showsCloseButtonOnHover: Bool
     let onClose: (() -> Void)?
     @State private var isHovered = false
@@ -574,11 +562,8 @@ struct ContextSummaryView: View {
                 .lineLimit(1)
                 .truncationMode(.tail)
                 .foregroundColor(.primary)
-
-            Spacer(minLength: 8)
-            VoiceTrailingIndicator(state: voiceState, level: voiceLevel)
         }
-        .frame(maxWidth: .infinity)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .onHover { isHovered = $0 }
     }
 
@@ -703,6 +688,6 @@ struct CompactVoiceWaveformView: View {
 
 private extension SearchViewModel {
     var hasPanelHeaderContent: Bool {
-        !selectedText.isEmpty || (objectTextEnabled && hoveredParts.last != nil) || isVoiceModeActive
+        !selectedText.isEmpty || hoveredContextIcon != nil || (objectTextEnabled && hoveredParts.last != nil)
     }
 }

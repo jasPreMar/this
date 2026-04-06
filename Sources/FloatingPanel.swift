@@ -36,6 +36,7 @@ class FloatingPanel: NSPanel {
     private var focusRestorationState: FocusRestorationState?
     private var shouldRestoreFocusOnClose = true
     private let voiceController = VoiceDictationController()
+    private lazy var voiceIndicatorPanel = VoiceIndicatorPanel()
     private var pendingRealtimeLogStopWorkItem: DispatchWorkItem?
     private var safeTriangleApex: NSPoint?
     private var invokeHoldBehavior: InvokeHoldBehavior?
@@ -240,6 +241,9 @@ class FloatingPanel: NSPanel {
         }
         voiceController.onLevelChange = { [weak self] level in
             self?.searchViewModel.voiceLevel = level
+            if self?.searchViewModel.voiceState == .listening {
+                self?.showVoiceIndicator()
+            }
         }
         voiceController.onPartialTranscript = { transcript in
             RealtimeInputLog.shared.recordSpeechPartial(transcript)
@@ -255,6 +259,18 @@ class FloatingPanel: NSPanel {
         searchViewModel.$isMinimalMode
             .sink { [weak self] _ in
                 self?.updateGlassCornerRadius()
+            }
+            .store(in: &cancellables)
+
+        searchViewModel.$query
+            .dropFirst()
+            .filter { !$0.isEmpty }
+            .sink { [weak self] _ in
+                guard let self,
+                      self.invokeHoldBehavior == .pinnedFollow,
+                      self.searchViewModel.isVoiceModeActive else { return }
+                self.voiceController.cancel()
+                self.voiceIndicatorPanel.hidePanel()
             }
             .store(in: &cancellables)
 
@@ -1565,14 +1581,6 @@ class FloatingPanel: NSPanel {
         guard invokeHoldBehavior == .pinnedFollow else { return }
 
         let mouseLocation = NSEvent.mouseLocation
-
-        // If voice has actually transcribed speech, stay in voice mode — just follow
-        if voiceController.hasTranscribedSpeech {
-            positionAtCursor(using: mouseLocation)
-            searchViewModel.updateHoveredApp()
-            return
-        }
-
         let cursorOverPanel = isCursorOverPanel(mouseLocation)
 
         if pinnedInputVisible {
@@ -1601,13 +1609,9 @@ class FloatingPanel: NSPanel {
     private func resetPinnedPauseTimer() {
         cancelPinnedPauseTimer()
 
-        // Don't start pause timer if voice has transcribed speech
-        guard !voiceController.hasTranscribedSpeech else { return }
-
         let workItem = DispatchWorkItem { [weak self] in
             guard let self,
-                  self.invokeHoldBehavior == .pinnedFollow,
-                  !self.voiceController.hasTranscribedSpeech else { return }
+                  self.invokeHoldBehavior == .pinnedFollow else { return }
             self.showPinnedInput()
         }
         pinnedPauseWorkItem = workItem
@@ -1621,10 +1625,6 @@ class FloatingPanel: NSPanel {
 
     private func showPinnedInput() {
         guard invokeHoldBehavior == .pinnedFollow else { return }
-        // Stop voice if it's listening but hasn't transcribed anything
-        if searchViewModel.isVoiceModeActive && !voiceController.hasTranscribedSpeech {
-            voiceController.cancel()
-        }
         pinnedInputVisible = true
         searchViewModel.isCommandKeyMode = false
         prepareForTextInputFocus()
@@ -1825,6 +1825,7 @@ class FloatingPanel: NSPanel {
     }
 
     func dismiss(restorePreviousFocus: Bool = true) {
+        voiceIndicatorPanel.hidePanel()
         shouldRestoreFocusOnClose = restorePreviousFocus
         close()
     }
@@ -1838,6 +1839,7 @@ class FloatingPanel: NSPanel {
         cancelPendingRealtimeLogStop()
         RealtimeInputLog.shared.stopSession()
         voiceController.cancel()
+        voiceIndicatorPanel.hidePanel()
         orderOut(nil)
         isCommandKeyVisible = false
         isCursorFollowing = false
@@ -1909,19 +1911,23 @@ class FloatingPanel: NSPanel {
         case .idle:
             searchViewModel.voiceState = .idle
             searchViewModel.voiceLevel = 0
+            voiceIndicatorPanel.hidePanel()
             if !isCommandKeyHeld {
                 scheduleRealtimeLogStopIfNeeded()
             }
         case .listening:
             cancelPendingRealtimeLogStop()
             searchViewModel.voiceState = .listening
+            showVoiceIndicator()
         case .transcribing:
             cancelPendingRealtimeLogStop()
             searchViewModel.voiceState = .transcribing
             searchViewModel.voiceLevel = 0
+            // Keep voice indicator visible during transcription
         case .failed(let message):
             searchViewModel.voiceState = .failed(message)
             searchViewModel.voiceLevel = 0
+            voiceIndicatorPanel.hidePanel()
             if !isCommandKeyHeld {
                 RealtimeInputLog.shared.stopSession()
             }
@@ -1931,6 +1937,30 @@ class FloatingPanel: NSPanel {
                 self.searchViewModel.voiceState = .idle
             }
         }
+    }
+
+    private func showVoiceIndicator() {
+        let isPinned = invokeHoldBehavior == .pinnedFollow
+        voiceIndicatorPanel.onHoverChange = { [weak self] hovered in
+            guard let self, self.invokeHoldBehavior == .pinnedFollow else { return }
+            if hovered {
+                self.orderOut(nil)
+            } else {
+                self.orderFront(nil)
+            }
+        }
+        voiceIndicatorPanel.update(
+            voiceLevel: searchViewModel.voiceLevel,
+            isPinnedMode: isPinned,
+            onCancel: { [weak self] in
+                self?.voiceController.cancel()
+                self?.dismiss(restorePreviousFocus: true)
+            },
+            onSend: { [weak self] in
+                self?.voiceController.stop()
+            }
+        )
+        voiceIndicatorPanel.showPanel()
     }
 
     private func scheduleRealtimeLogStopIfNeeded() {
