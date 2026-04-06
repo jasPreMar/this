@@ -418,15 +418,15 @@ func testAssistantResponseDirectives() {
         isTaskIconMode: true
     ), "preserveCompletionDismissesTaskIcon")
 
-    assert(!shouldAutoDismissFloatingPanelOnCompletion(
+    assert(shouldAutoDismissFloatingPanelOnCompletion(
         completionAction: .reveal,
         isTaskIconMode: true
-    ), "revealCompletionKeepsTaskIconVisible")
+    ), "revealCompletionAlwaysDismissesTaskIcon")
 
     assert(!shouldAutoDismissFloatingPanelOnCompletion(
         completionAction: .preserve,
         isTaskIconMode: false
-    ), "preserveCompletionOnlyDismissesTaskIconMode")
+    ), "nonTaskIconModeNeverAutoDismisses")
 
     assert(shouldMarkTaskEligibleForClosedCommandMenuReveal(
         isCommandMenuVisible: false
