@@ -114,6 +114,7 @@ class VoiceIndicatorPanel: NSPanel {
         if isHovered {
             isHovered = false
             onHoverChange?(false)
+            NSCursor.pop()
         }
         orderOut(nil)
     }
