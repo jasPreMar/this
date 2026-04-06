@@ -1115,8 +1115,13 @@ class FloatingPanel: NSPanel {
     private func removeTaskIconMonitors() {
         if let m = taskIconHoverMonitor { NSEvent.removeMonitor(m) }
         if let m = taskIconLocalHoverMonitor { NSEvent.removeMonitor(m) }
+        if let m = taskIconDragMonitor { NSEvent.removeMonitor(m) }
+        if let m = taskIconGlobalDragMonitor { NSEvent.removeMonitor(m) }
         taskIconHoverMonitor = nil
         taskIconLocalHoverMonitor = nil
+        taskIconDragMonitor = nil
+        taskIconGlobalDragMonitor = nil
+        taskIconIsDragging = false
     }
 
     func reopenPersistentTaskWindow() {
