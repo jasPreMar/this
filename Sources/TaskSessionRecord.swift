@@ -42,14 +42,14 @@ final class TaskSessionRecord: ObservableObject, Identifiable {
         self.persistedSessionId = session.id
         self.title = session.title
         self.subtitle = session.subtitle
-        self.icon = nil
+        self.icon = session.iconPNGData.flatMap { NSImage(data: $0) }
         self.startedAt = session.startedAt
         self.currentStreamStartedAt = nil
         self.completedAt = session.completedAt
         self.lastActivityAt = session.lastActivityAt
         self.isWindowVisible = false
         self.isRunning = false
-        self.isUnread = true
+        self.isUnread = session.isUnread ?? (session.completedAt != nil)
     }
 
     var searchViewModel: SearchViewModel? {

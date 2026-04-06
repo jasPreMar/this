@@ -600,7 +600,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     @objc private func handleStatusKillAll() {
         closeCommandMenu()
         for panel in panels {
-            panel.saveChatSession()
+            let record = taskRecordLookup[ObjectIdentifier(panel)]
+            panel.saveChatSession(isUnread: record?.isUnread)
             panel.searchViewModel.claudeManager?.stop()
             panel.destroyPersistentTaskWindow()
             ghostCursorStore.unregisterTask(panel.taskId)
@@ -1325,7 +1326,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         guard let closingIndex = taskRecords.firstIndex(where: { $0.id == record.id }) else { return }
 
         if let panel = record.panel {
-            panel.saveChatSession()
+            panel.saveChatSession(isUnread: record.isUnread)
         }
 
         let persistedId = record.persistedSessionId ?? record.panel?.persistedSessionId

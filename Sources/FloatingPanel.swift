@@ -1077,7 +1077,7 @@ class FloatingPanel: NSPanel {
         notifyTaskStateChanged()
     }
 
-    func saveChatSession() {
+    func saveChatSession(isUnread: Bool? = nil) {
         guard preservesTaskHistory, !searchViewModel.chatHistory.isEmpty else { return }
 
         let id = persistedSessionId ?? UUID().uuidString
@@ -1085,6 +1085,10 @@ class FloatingPanel: NSPanel {
 
         let messages = searchViewModel.chatHistory.map {
             PersistedMessage(role: $0.role, text: $0.text, structuredUI: $0.structuredUI)
+        }
+
+        let iconData: Data? = taskDisplayIcon?.tiffRepresentation.flatMap {
+            NSBitmapImageRep(data: $0)?.representation(using: .png, properties: [:])
         }
 
         let session = PersistedChatSession(
@@ -1096,7 +1100,9 @@ class FloatingPanel: NSPanel {
             startedAt: taskStartedAt ?? Date(),
             completedAt: taskCompletedAt,
             lastActivityAt: taskLastActivityAt ?? Date(),
-            workingDirectoryPath: searchViewModel.currentSessionWorkingDirectoryURL?.path
+            workingDirectoryPath: searchViewModel.currentSessionWorkingDirectoryURL?.path,
+            iconPNGData: iconData,
+            isUnread: isUnread
         )
 
         ChatSessionStore.shared.save(session)
