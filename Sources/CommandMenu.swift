@@ -1469,7 +1469,7 @@ private struct CommandMenuChatSection: View {
                     HStack {
                         Spacer(minLength: 40)
                         Text(entry.text)
-                            .font(.system(size: 13))
+                            .font(.system(size: 14))
                             .foregroundColor(.primary)
                             .padding(.horizontal, 12)
                             .padding(.vertical, 8)
@@ -1653,7 +1653,7 @@ private struct CommandMenuTextInputRow: View {
         HStack(spacing: 12) {
             ZStack(alignment: .leading) {
                 Text(placeholder)
-                    .font(.system(size: 17))
+                    .font(.system(size: 14))
                     .foregroundStyle(.secondary)
                     .opacity(text.isEmpty ? 1 : 0)
                     .allowsHitTesting(false)
@@ -1665,7 +1665,7 @@ private struct CommandMenuTextInputRow: View {
                     onSubmit: onSubmit,
                     onKeyDown: onKeyDown,
                     onCommandSelector: onCommandSelector,
-                    font: .systemFont(ofSize: 17, weight: .regular)
+                    font: .systemFont(ofSize: 14, weight: .regular)
                 )
                 .frame(height: max(textHeight, 22))
                 .frame(maxWidth: .infinity, alignment: .leading)
