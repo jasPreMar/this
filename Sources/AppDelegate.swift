@@ -1435,7 +1435,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     }
 
     func reopenRememberedOrLatestTaskRecord() {
-        if let record = resolvedCommandMenuChatRecord(preferred: nil) ?? taskRecords.last {
+        if let record = resolvedCommandMenuChatRecord(preferred: nil) ?? taskRecords.first {
             openTaskRecord(record)
         }
     }
