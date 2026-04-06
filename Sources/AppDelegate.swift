@@ -171,6 +171,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     private let onboardingSeenKey = "hasShownOnboarding"
     private let onboardingSeenInstallKey = "hasShownOnboardingInstallID"
     private var checkForUpdatesItem: NSMenuItem?
+    private var openItem: NSMenuItem?
     private var updateDot: NSView?
     private var updateCheckTimer: Timer?
     private var feedbackPopover: NSPopover?
@@ -526,41 +527,37 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
         }
 
-        let homeItem = NSMenuItem(title: "Home", action: #selector(handleStatusHome), keyEquivalent: "")
-        homeItem.target = self
+        let hotKey = InvokeHotKey.stored()
+        let openItem = NSMenuItem(title: "Open", action: #selector(handleStatusHome), keyEquivalent: " ")
+        openItem.keyEquivalentModifierMask = [hotKey.modifierFlag]
+        openItem.target = self
+        self.openItem = openItem
 
-        let newPanelItem = NSMenuItem(title: "New Panel", action: #selector(handleStatusNewPanel), keyEquivalent: "n")
-        newPanelItem.target = self
-
-        let settingsItem = NSMenuItem(title: "Settings…", action: #selector(handleStatusOpenSettings), keyEquivalent: ",")
-        settingsItem.target = self
+        let historyItem = NSMenuItem(title: "History", action: nil, keyEquivalent: "")
+        historyItem.submenu = NSMenu(title: "History")
 
         let checkForUpdatesItem = NSMenuItem(title: "Check for Updates…", action: #selector(SPUStandardUpdaterController.checkForUpdates(_:)), keyEquivalent: "")
         checkForUpdatesItem.target = updaterController
         self.checkForUpdatesItem = checkForUpdatesItem
 
-        let onboardingItem = NSMenuItem(title: "Open Onboarding", action: #selector(handleStatusOpenOnboarding), keyEquivalent: "")
-        onboardingItem.target = self
-
-        let leaveFeedbackItem = NSMenuItem(title: "Leave Feedback", action: #selector(handleStatusLeaveFeedback), keyEquivalent: "")
-        leaveFeedbackItem.target = self
+        let settingsItem = NSMenuItem(title: "Settings…", action: #selector(handleStatusOpenSettings), keyEquivalent: ",")
+        settingsItem.target = self
 
         let killAllItem = NSMenuItem(title: "Kill All Tasks", action: #selector(handleStatusKillAll), keyEquivalent: "k")
         killAllItem.target = self
 
         let quitItem = NSMenuItem(title: "Quit This", action: #selector(handleStatusQuit), keyEquivalent: "q")
         quitItem.target = self
+        quitItem.image = NSImage(systemSymbolName: "xmark.app", accessibilityDescription: "Quit")
 
         let menu = NSMenu()
-        menu.addItem(homeItem)
-        menu.addItem(.separator())
-        menu.addItem(newPanelItem)
-        menu.addItem(settingsItem)
-        menu.addItem(killAllItem)
-        menu.addItem(onboardingItem)
+        menu.addItem(openItem)
+        menu.addItem(historyItem)
         menu.addItem(.separator())
         menu.addItem(checkForUpdatesItem)
-        menu.addItem(leaveFeedbackItem)
+        menu.addItem(.separator())
+        menu.addItem(settingsItem)
+        menu.addItem(killAllItem)
         menu.addItem(.separator())
         menu.addItem(quitItem)
 
@@ -610,6 +607,56 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         taskRecords.removeAll()
         taskRecordLookup.removeAll()
         loadPersistedChatSessions()
+    }
+
+    private func populateHistorySubmenu() {
+        guard let submenu = legacyStatusMenu?.item(withTitle: "History")?.submenu else { return }
+        submenu.removeAllItems()
+
+        let sessions = ChatSessionStore.shared.loadAll()
+            .sorted { $0.lastActivityAt > $1.lastActivityAt }
+            .prefix(100)
+
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+
+        for session in sessions {
+            let title = session.title.isEmpty ? "Untitled" : session.title
+            let dateStr = formatter.string(from: session.lastActivityAt)
+            let item = NSMenuItem(title: "\(title) — \(dateStr)", action: #selector(handleHistoryItemClick(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = session.id
+            submenu.addItem(item)
+        }
+
+        if sessions.isEmpty {
+            let emptyItem = NSMenuItem(title: "No History", action: nil, keyEquivalent: "")
+            emptyItem.isEnabled = false
+            submenu.addItem(emptyItem)
+        }
+
+        submenu.addItem(.separator())
+        let showAllItem = NSMenuItem(title: "Show All in Finder", action: #selector(handleShowAllHistory), keyEquivalent: "")
+        showAllItem.target = self
+        submenu.addItem(showAllItem)
+    }
+
+    @objc private func handleHistoryItemClick(_ sender: NSMenuItem) {
+        guard let sessionId = sender.representedObject as? String else { return }
+        if let record = taskRecords.first(where: { $0.persistedSessionId == sessionId }) {
+            openTaskRecord(record)
+            showCommandMenu(from: .invokeHotKey)
+        } else if let session = ChatSessionStore.shared.load(id: sessionId) {
+            let record = TaskSessionRecord(persisted: session)
+            taskRecords.insert(record, at: 0)
+            openTaskRecord(record)
+            showCommandMenu(from: .invokeHotKey)
+        }
+    }
+
+    @objc private func handleShowAllHistory() {
+        NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: ChatSessionStore.shared.sessionsDirectory.path)
     }
 
     @objc private func handleStatusQuit() {
@@ -2086,6 +2133,13 @@ extension AppDelegate: SPUUpdaterDelegate {
 }
 
 extension AppDelegate: NSMenuDelegate {
+    func menuWillOpen(_ menu: NSMenu) {
+        if menu === legacyStatusMenu {
+            openItem?.keyEquivalentModifierMask = [InvokeHotKey.stored().modifierFlag]
+            populateHistorySubmenu()
+        }
+    }
+
     func menuDidClose(_ menu: NSMenu) {
         if menu === legacyStatusMenu {
             statusItem?.menu = nil

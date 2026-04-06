@@ -27,7 +27,7 @@ struct PersistedChatSession: Codable {
 final class ChatSessionStore {
     static let shared = ChatSessionStore()
 
-    private let sessionsDirectory: URL
+    let sessionsDirectory: URL
     private let encoder: JSONEncoder = {
         let e = JSONEncoder()
         e.dateEncodingStrategy = .iso8601
