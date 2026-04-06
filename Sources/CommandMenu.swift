@@ -786,12 +786,7 @@ struct CommandMenuView: View {
 
     private func titleBar(screenHeight: CGFloat) -> some View {
         HStack(spacing: 0) {
-            SettingsMenuButton(
-                onCheckForUpdates: { appDelegate.checkForUpdatesFromCommandMenu() },
-                onLeaveFeedback: { openFeedback() },
-                onSettings: { openSettings() },
-                onQuit: { appDelegate.quitFromCommandMenu() }
-            )
+            SettingsMenuButton()
             .padding(.leading, CommandMenuChromeMetrics.edgePadding)
 
             if canResizeFromHeader {
@@ -1783,10 +1778,6 @@ private struct MenuAnchorRepresentable: NSViewRepresentable {
 }
 
 private struct SettingsMenuButton: View {
-    let onCheckForUpdates: () -> Void
-    let onLeaveFeedback: () -> Void
-    let onSettings: () -> Void
-    let onQuit: () -> Void
 
     @State private var isHovering = false
     @State private var anchorView: NSView?
@@ -1832,6 +1823,7 @@ private struct SettingsMenuButton: View {
 
     private static func loadTemplateIcon() -> NSImage? {
         let candidates: [() -> NSImage?] = [
+            { Bundle.module.image(forResource: "StatusBarIcon") },
             { Bundle.main.image(forResource: "StatusBarIcon") },
             {
                 let url = Bundle.main.resourceURL?
@@ -1869,27 +1861,32 @@ private struct SettingsMenuButton: View {
         let menu = NSMenu()
         menu.autoenablesItems = false
 
-        let items: [(String, String, Int, () -> Void)] = [
-            ("Check for Updates", "u", 0, onCheckForUpdates),
-            ("Leave Feedback", "l", 1, onLeaveFeedback),
-            ("Settings", ",", 2, onSettings),
+        // Toggle settings
+        let toggles: [(String, Bool, Int)] = [
+            ("Sound Effects", AppSettings.chimeEnabled, 100),
+            ("Object Highlighting", AppSettings.highlightOverlayEnabled, 101),
+            ("Object Text", AppSettings.objectTextEnabled, 102),
+            ("Auto-Voice", AppSettings.autoVoiceEnabled, 103),
+            ("Structured UI", AppSettings.structuredUIEnabled, 104),
         ]
 
-        for (title, keyEquiv, tag, action) in items {
-            let item = NSMenuItem(title: title, action: #selector(MenuActionHandler.performAction(_:)), keyEquivalent: keyEquiv)
+        for (title, isOn, tag) in toggles {
+            let item = NSMenuItem(title: title, action: #selector(MenuActionHandler.performAction(_:)), keyEquivalent: "")
             item.tag = tag
             item.target = handler
-            handler.actions[tag] = action
+            item.state = isOn ? .on : .off
+            handler.actions[tag] = {
+                switch tag {
+                case 100: AppSettings.chimeEnabled = !AppSettings.chimeEnabled
+                case 101: AppSettings.highlightOverlayEnabled = !AppSettings.highlightOverlayEnabled
+                case 102: AppSettings.objectTextEnabled = !AppSettings.objectTextEnabled
+                case 103: AppSettings.autoVoiceEnabled = !AppSettings.autoVoiceEnabled
+                case 104: AppSettings.structuredUIEnabled = !AppSettings.structuredUIEnabled
+                default: break
+                }
+            }
             menu.addItem(item)
         }
-
-        menu.addItem(.separator())
-
-        let quitItem = NSMenuItem(title: "Quit This", action: #selector(MenuActionHandler.performAction(_:)), keyEquivalent: "q")
-        quitItem.tag = 3
-        quitItem.target = handler
-        handler.actions[3] = onQuit
-        menu.addItem(quitItem)
 
         let point = NSPoint(x: 0, y: anchorView.bounds.height + 4)
         menu.popUp(positioning: nil, at: point, in: anchorView)
