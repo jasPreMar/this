@@ -1415,10 +1415,18 @@ class FloatingPanel: NSPanel {
         if let m = localMouseMonitor { NSEvent.removeMonitor(m); localMouseMonitor = nil }
         isCursorFollowing = false
 
-        guard isCommandKeyVisible else {
+        // If voice is active, treat it as if the cursor moved — the user
+        // engaged via voice even though the pointer stayed still.
+        let voiceActive = searchViewModel.voiceState == .listening || searchViewModel.voiceState == .transcribing
+        guard isCommandKeyVisible || voiceActive else {
             voiceController.cancel()
             dismiss(restorePreviousFocus: false)
             return
+        }
+
+        if !isCommandKeyVisible {
+            isCommandKeyVisible = true
+            searchViewModel.isMinimalMode = false
         }
 
         stopVoiceModeIfNeeded()
