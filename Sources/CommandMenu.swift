@@ -1823,7 +1823,6 @@ private struct SettingsMenuButton: View {
 
     private static func loadTemplateIcon() -> NSImage? {
         let candidates: [() -> NSImage?] = [
-            { Bundle.module.image(forResource: "StatusBarIcon") },
             { Bundle.main.image(forResource: "StatusBarIcon") },
             {
                 let url = Bundle.main.resourceURL?
