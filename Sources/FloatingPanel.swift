@@ -51,6 +51,11 @@ class FloatingPanel: NSPanel {
     private var taskIconHoverMonitor: Any?
     private var taskIconLocalHoverMonitor: Any?
     private var taskIconAutoCollapseTimer: Timer?
+    private var taskIconMouseDownTime: TimeInterval?
+    private var taskIconDidDrag = false
+    private var taskIconIsDragging = false
+    private var taskIconDragMonitor: Any?
+    private var taskIconGlobalDragMonitor: Any?
     private var cancellables = Set<AnyCancellable>()
     private var restoredTaskTitle: String?
     private var restoredTaskSubtitle: String?
@@ -323,24 +328,49 @@ class FloatingPanel: NSPanel {
     /// button) receive their events. If the mouse starts moving before the button
     /// is released, kick off a native window drag instead.
     override func sendEvent(_ event: NSEvent) {
-        if event.type == .leftMouseDown, isTerminalMode {
+        if event.type == .leftMouseDown, isTerminalMode || isTaskIconMode {
             cancelPendingDrag()
             let hit = contentView?.hitTest(event.locationInWindow)
             // Skip drag monitoring for scroll / text-input areas so they keep working.
             if !isScrollOrTextInput(hit) {
+                let isIcon = isTaskIconMode
+                let downTime = ProcessInfo.processInfo.systemUptime
                 pendingDragEvent = event
+                taskIconMouseDownTime = isIcon ? downTime : nil
+                taskIconDidDrag = false
                 dragStartMonitor = NSEvent.addLocalMonitorForEvents(
                     matching: [.leftMouseDragged, .leftMouseUp]
                 ) { [weak self] e in
                     guard let self else { return e }
                     if e.type == .leftMouseDragged, let original = self.pendingDragEvent {
+                        self.taskIconDidDrag = true
+                        if isIcon {
+                            // Manual drag for task icon — performDrag doesn't
+                            // work reliably on non-activating borderless panels.
+                            self.cancelPendingDrag()
+                            self.startTaskIconManualDrag(from: original)
+                            return nil
+                        }
                         self.cancelPendingDrag()
                         self.performDrag(with: original)
                         return nil  // consume — performDrag takes over tracking
                     }
-                    if e.type == .leftMouseUp { self.cancelPendingDrag() }
+                    if e.type == .leftMouseUp {
+                        let didDrag = self.taskIconDidDrag
+                        let mouseDownTime = self.taskIconMouseDownTime
+                        self.cancelPendingDrag()
+                        // Task icon: only open chat on quick tap (< 500ms) with no drag
+                        if isIcon, !didDrag, let t = mouseDownTime,
+                           ProcessInfo.processInfo.systemUptime - t < 0.5 {
+                            self.transitionTaskIconToCommandMenu()
+                            return nil
+                        }
+                    }
                     return e
                 }
+                // In task icon mode, consume the mouseDown so it doesn't
+                // immediately trigger transitionTaskIconToCommandMenu().
+                if isIcon { return }
             }
         }
         super.sendEvent(event)
@@ -884,6 +914,7 @@ class FloatingPanel: NSPanel {
     }
 
     private func updateTaskIconPosition() {
+        guard !taskIconIsDragging else { return }
         guard let windowID = taskIconWindowID, let offset = taskIconWindowOffset else { return }
 
         let options: CGWindowListOption = [.optionIncludingWindow]
@@ -918,6 +949,79 @@ class FloatingPanel: NSPanel {
             // When hovered/expanded, shift the expanded frame to track the window
             expandTaskIconForHover()
         }
+    }
+
+    /// Manually track mouse movement to drag the task icon, since performDrag
+    /// doesn't work reliably on non-activating borderless panels.
+    private func startTaskIconManualDrag(from mouseDownEvent: NSEvent) {
+        taskIconIsDragging = true
+        let startMouse = NSEvent.mouseLocation
+        let startOrigin = frame.origin
+
+        taskIconDragMonitor = NSEvent.addLocalMonitorForEvents(
+            matching: [.leftMouseDragged, .leftMouseUp]
+        ) { [weak self] event in
+            guard let self else { return event }
+            if event.type == .leftMouseDragged {
+                let current = NSEvent.mouseLocation
+                let newOrigin = NSPoint(
+                    x: startOrigin.x + (current.x - startMouse.x),
+                    y: startOrigin.y + (current.y - startMouse.y)
+                )
+                self.setFrameOrigin(newOrigin)
+                return nil
+            }
+            if event.type == .leftMouseUp {
+                self.stopTaskIconManualDrag()
+                return nil
+            }
+            return event
+        }
+        taskIconGlobalDragMonitor = NSEvent.addGlobalMonitorForEvents(
+            matching: [.leftMouseDragged, .leftMouseUp]
+        ) { [weak self] event in
+            guard let self else { return }
+            if event.type == .leftMouseDragged {
+                let current = NSEvent.mouseLocation
+                let newOrigin = NSPoint(
+                    x: startOrigin.x + (current.x - startMouse.x),
+                    y: startOrigin.y + (current.y - startMouse.y)
+                )
+                self.setFrameOrigin(newOrigin)
+            }
+            if event.type == .leftMouseUp {
+                self.stopTaskIconManualDrag()
+            }
+        }
+    }
+
+    private func stopTaskIconManualDrag() {
+        if let m = taskIconDragMonitor { NSEvent.removeMonitor(m); taskIconDragMonitor = nil }
+        if let m = taskIconGlobalDragMonitor { NSEvent.removeMonitor(m); taskIconGlobalDragMonitor = nil }
+        taskIconIsDragging = false
+        updateTaskIconOffsetAfterDrag()
+    }
+
+    /// After the user drags the task icon, update the anchor and tracked-window
+    /// offset so the follow timer continues from the new position.
+    private func updateTaskIconOffsetAfterDrag() {
+        taskIconAnchorOrigin = frame.origin
+
+        guard let windowID = taskIconWindowID else { return }
+        let options: CGWindowListOption = [.optionIncludingWindow]
+        guard let windowList = CGWindowListCopyWindowInfo(options, windowID) as? [[CFString: Any]],
+              let windowInfo = windowList.first,
+              let boundsDict = windowInfo[kCGWindowBounds] as? [String: CGFloat],
+              let wx = boundsDict["X"],
+              let wy = boundsDict["Y"],
+              let wh = boundsDict["Height"] else { return }
+
+        let screenHeight = NSScreen.main?.frame.height ?? 0
+        let windowOrigin = CGPoint(x: wx, y: screenHeight - wy - wh)
+        taskIconWindowOffset = CGPoint(
+            x: frame.origin.x - windowOrigin.x,
+            y: frame.origin.y - windowOrigin.y
+        )
     }
 
     private func handleTaskIconMouseMove() {
@@ -1011,8 +1115,13 @@ class FloatingPanel: NSPanel {
     private func removeTaskIconMonitors() {
         if let m = taskIconHoverMonitor { NSEvent.removeMonitor(m) }
         if let m = taskIconLocalHoverMonitor { NSEvent.removeMonitor(m) }
+        if let m = taskIconDragMonitor { NSEvent.removeMonitor(m) }
+        if let m = taskIconGlobalDragMonitor { NSEvent.removeMonitor(m) }
         taskIconHoverMonitor = nil
         taskIconLocalHoverMonitor = nil
+        taskIconDragMonitor = nil
+        taskIconGlobalDragMonitor = nil
+        taskIconIsDragging = false
     }
 
     func reopenPersistentTaskWindow() {

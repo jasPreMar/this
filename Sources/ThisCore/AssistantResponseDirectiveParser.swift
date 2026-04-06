@@ -43,7 +43,7 @@ public func shouldAutoDismissFloatingPanelOnCompletion(
     completionAction: CommandMenuCompletionAction,
     isTaskIconMode: Bool
 ) -> Bool {
-    isTaskIconMode && completionAction == .preserve
+    isTaskIconMode
 }
 
 public func shouldMarkTaskEligibleForClosedCommandMenuReveal(
