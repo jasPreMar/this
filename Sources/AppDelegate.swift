@@ -526,10 +526,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
         }
 
-        let bundle = Bundle.main
-        let shortVersion = bundle.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
-        let versionItem = NSMenuItem(title: "This v\(shortVersion)", action: nil, keyEquivalent: "")
-        versionItem.isEnabled = false
+        let homeItem = NSMenuItem(title: "Home", action: #selector(handleStatusHome), keyEquivalent: "")
+        homeItem.target = self
 
         let newPanelItem = NSMenuItem(title: "New Panel", action: #selector(handleStatusNewPanel), keyEquivalent: "n")
         newPanelItem.target = self
@@ -554,7 +552,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         quitItem.target = self
 
         let menu = NSMenu()
-        menu.addItem(versionItem)
+        menu.addItem(homeItem)
         menu.addItem(.separator())
         menu.addItem(newPanelItem)
         menu.addItem(settingsItem)
@@ -571,22 +569,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     }
 
     @objc private func handleStatusItemClick(_ sender: NSStatusBarButton) {
-        guard let event = NSApp.currentEvent else {
-            toggleCommandMenu(from: .statusItem)
-            return
+        closeCommandMenu()
+        if let legacyStatusMenu {
+            legacyStatusMenu.delegate = self
+            statusItem?.menu = legacyStatusMenu
+            statusItem?.button?.performClick(nil)
         }
+    }
 
-        switch event.type {
-        case .rightMouseUp:
-            closeCommandMenu()
-            if let legacyStatusMenu {
-                legacyStatusMenu.delegate = self
-                statusItem?.menu = legacyStatusMenu
-                statusItem?.button?.performClick(nil)
-            }
-        default:
-            toggleCommandMenu(from: .statusItem)
-        }
+    @objc private func handleStatusHome() {
+        showCommandMenu(from: .invokeHotKey)
     }
 
     @objc private func handleStatusNewPanel() {
