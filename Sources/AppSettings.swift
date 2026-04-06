@@ -5,6 +5,7 @@ enum ClaudeModelPreset: String, CaseIterable, Identifiable {
     case sonnet46 = "sonnet"
     case opus46 = "opus"
     case opus461M = "opus[1m]"
+    case haiku45 = "haiku"
 
     var id: String { rawValue }
 
@@ -16,7 +17,42 @@ enum ClaudeModelPreset: String, CaseIterable, Identifiable {
             return "Opus 4.6"
         case .opus461M:
             return "Opus 4.6 1M"
+        case .haiku45:
+            return "Haiku 4.5"
         }
+    }
+
+    var shortDisplayName: String {
+        switch self {
+        case .sonnet46:
+            return "Sonnet"
+        case .opus46:
+            return "Opus"
+        case .opus461M:
+            return "Opus 1M"
+        case .haiku45:
+            return "Haiku"
+        }
+    }
+
+    var menuOrder: Int {
+        switch self {
+        case .opus461M: return 0
+        case .opus46: return 1
+        case .sonnet46: return 2
+        case .haiku45: return 3
+        }
+    }
+
+    var isOpus: Bool {
+        switch self {
+        case .opus46, .opus461M: return true
+        default: return false
+        }
+    }
+
+    static var menuSorted: [ClaudeModelPreset] {
+        allCases.sorted { $0.menuOrder < $1.menuOrder }
     }
 }
 
@@ -27,6 +63,7 @@ enum AppSettings {
         static let defaultModel = "defaultClaudeModel"
         static let thinkingEnabled = "defaultClaudeThinkingEnabled"
         static let fastModeEnabled = "defaultClaudeFastModeEnabled"
+        static let planModeEnabled = "defaultClaudePlanModeEnabled"
         static let quickActionsEnabled = "quickActionsEnabled"
         static let ghostCursorEnabled = "ghostCursorEnabled"
         static let ghostCursorClickSoundEnabled = "ghostCursorClickSoundEnabled"
@@ -45,6 +82,7 @@ enum AppSettings {
             Keys.defaultModel: ClaudeModelPreset.sonnet46.rawValue,
             Keys.thinkingEnabled: false,
             Keys.fastModeEnabled: false,
+            Keys.planModeEnabled: false,
             Keys.quickActionsEnabled: true,
             Keys.ghostCursorEnabled: false,
             Keys.ghostCursorClickSoundEnabled: false,
@@ -93,6 +131,11 @@ enum AppSettings {
     static var fastModeEnabled: Bool {
         get { UserDefaults.standard.bool(forKey: Keys.fastModeEnabled) }
         set { UserDefaults.standard.set(newValue, forKey: Keys.fastModeEnabled) }
+    }
+
+    static var planModeEnabled: Bool {
+        get { UserDefaults.standard.bool(forKey: Keys.planModeEnabled) }
+        set { UserDefaults.standard.set(newValue, forKey: Keys.planModeEnabled) }
     }
 
     static var quickActionsEnabled: Bool {
@@ -153,11 +196,12 @@ enum AppSettings {
         let payload: [String: Any] = [
             "fastMode": fastModeEnabled,
             "fastModePerSessionOptIn": false,
+            "planMode": planModeEnabled,
         ]
 
         guard let data = try? JSONSerialization.data(withJSONObject: payload, options: []),
               let string = String(data: data, encoding: .utf8) else {
-            return #"{"fastMode":false,"fastModePerSessionOptIn":false}"#
+            return #"{"fastMode":false,"fastModePerSessionOptIn":false,"planMode":false}"#
         }
 
         return string
@@ -182,6 +226,9 @@ final class AppSettingsStore: ObservableObject {
     }
     @Published var fastModeEnabled: Bool {
         didSet { AppSettings.fastModeEnabled = fastModeEnabled }
+    }
+    @Published var planModeEnabled: Bool {
+        didSet { AppSettings.planModeEnabled = planModeEnabled }
     }
     @Published var quickActionsEnabled: Bool {
         didSet { AppSettings.quickActionsEnabled = quickActionsEnabled }
@@ -213,6 +260,7 @@ final class AppSettingsStore: ObservableObject {
         defaultModel = AppSettings.defaultModel
         thinkingEnabled = AppSettings.thinkingEnabled
         fastModeEnabled = AppSettings.fastModeEnabled
+        planModeEnabled = AppSettings.planModeEnabled
         quickActionsEnabled = AppSettings.quickActionsEnabled
         ghostCursorEnabled = AppSettings.ghostCursorEnabled
         ghostCursorClickSoundEnabled = AppSettings.ghostCursorClickSoundEnabled
