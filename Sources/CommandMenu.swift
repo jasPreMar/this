@@ -1576,7 +1576,7 @@ private struct CommandMenuTabButton: View {
                             .frame(width: 6, height: 6)
                     }
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
