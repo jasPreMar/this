@@ -947,7 +947,7 @@ extension Theme {
     static let assistant = Theme()
         .text {
             ForegroundColor(.primary)
-            FontSize(13)
+            FontSize(14)
         }
         .strong {
             FontWeight(.semibold)
@@ -1177,7 +1177,7 @@ struct ChatView: View {
                     HStack {
                         Spacer(minLength: 40)
                         Text(entry.text)
-                            .font(.system(size: 13))
+                            .font(.system(size: 14))
                             .foregroundColor(.white)
                             .padding(.horizontal, 12)
                             .padding(.vertical, 8)

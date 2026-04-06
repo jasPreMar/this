@@ -328,7 +328,7 @@ struct FocusedTextField: NSViewRepresentable {
     var onSubmit: () -> Void
     var onKeyDown: ((NSEvent) -> Bool)? = nil
     var onCommandSelector: ((Selector) -> Bool)? = nil
-    var font: NSFont = .systemFont(ofSize: 13, weight: .regular)
+    var font: NSFont = .systemFont(ofSize: 14, weight: .regular)
     static let minWidth: CGFloat = 80
     static let maxWidth: CGFloat = 260
     static let maxHeight: CGFloat = 120
