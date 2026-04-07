@@ -1555,6 +1555,11 @@ class FloatingPanel: NSPanel {
     /// Escape (to cancel). Without voice, pausing on an object for >1s shows the
     /// text input; moving away hides it (unless text has been typed).
     func startPinnedFollowMode(with modifierFlags: NSEvent.ModifierFlags) {
+        // Cancel any in-progress voice from a prior mode (e.g. the first tap of a
+        // double-tap may have started command-key mode which began transcribing).
+        voiceController.cancel()
+        voiceIndicatorPanel.hidePanel()
+
         invokeHoldBehavior = .pinnedFollow
         isCommandKeyHeld = false
         currentModifierFlags = modifierFlags
@@ -1769,6 +1774,7 @@ class FloatingPanel: NSPanel {
         cancelPendingRealtimeLogStop()
         RealtimeInputLog.shared.stopSession()
         voiceController.cancel()
+        voiceIndicatorPanel.hidePanel()
         super.close()
         // Restore panel appearance for potential reuse
         if isTerminalMode {

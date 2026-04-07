@@ -64,3 +64,32 @@ Behaviors below have regressed before. Each MUST hold true before merging any PR
 - Points are deduplicated
 
 **Broken state:** Desktop detection or element lookup fails on certain screen configurations.
+
+---
+
+## 5. Voice Indicator Panel Cleanup on Close
+
+**Correct:** When the floating panel is closed (via `cancelOperation`, `dismiss`, or `close`), the bottom voice indicator panel is always hidden.
+
+**Where:** `Sources/FloatingPanel.swift` — `close()` method
+
+**Assertions:**
+- `close()` non-persistent path calls `voiceIndicatorPanel.hidePanel()` after `voiceController.cancel()`
+- `dismiss()` calls `voiceIndicatorPanel.hidePanel()` before `close()`
+- `hidePersistentTaskWindow()` calls `voiceIndicatorPanel.hidePanel()`
+
+**Broken state:** Voice indicator panel stays stuck on screen after pressing Escape in pinned follow mode. X button on the indicator stops working because the owning FloatingPanel is deallocated (weak self is nil).
+
+---
+
+## 6. Voice State Reset on Pinned Follow Mode Entry
+
+**Correct:** Entering pinned follow mode cancels any in-progress voice from a prior mode before starting a fresh voice session.
+
+**Where:** `Sources/FloatingPanel.swift` — `startPinnedFollowMode(with:)`
+
+**Assertions:**
+- `startPinnedFollowMode` calls `voiceController.cancel()` and `voiceIndicatorPanel.hidePanel()` before setting up pinned mode state
+- This ensures `voiceController.start()` later in the method finds state `.idle` and can begin a new session
+
+**Broken state:** On double-tap, voice panel appears briefly then vanishes because the first tap left voice in `.transcribing` state, causing `start()` to no-op.
