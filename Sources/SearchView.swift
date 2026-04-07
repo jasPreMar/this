@@ -325,12 +325,18 @@ struct FocusedTextField: NSViewRepresentable {
     final class InputTextView: NSTextView {
         var onWindowAttached: (() -> Void)?
         var onKeyDown: ((NSEvent) -> Bool)?
+        var onLayout: (() -> Void)?
 
         override var acceptsFirstResponder: Bool { true }
 
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
             onWindowAttached?()
+        }
+
+        override func layout() {
+            super.layout()
+            onLayout?()
         }
 
         override func keyDown(with event: NSEvent) {
@@ -383,6 +389,9 @@ struct FocusedTextField: NSViewRepresentable {
         textView.onWindowAttached = { [weak coordinator = context.coordinator] in
             coordinator?.attachWindowObserverIfNeeded()
             coordinator?.focusTextView()
+        }
+        textView.onLayout = { [weak coordinator = context.coordinator] in
+            coordinator?.updateHeight()
         }
 
         return scrollView

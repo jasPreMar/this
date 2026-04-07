@@ -1836,6 +1836,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         return nil
     }
 
+    /// Text that was in `commandMenuQuery` before the voice insertion point when recording started.
+    private var voicePrefix = ""
+    /// Text that was in `commandMenuQuery` after the voice insertion point when recording started.
+    private var voiceSuffix = ""
+    /// Separator inserted between prefix and voice text (computed once at start).
+    private var voiceSeparator = ""
+
     private func configureCommandMenuVoiceController() {
         commandMenuVoiceController.onStateChange = { [weak self] state in
             self?.handleCommandMenuVoiceStateChange(state)
@@ -1843,10 +1850,19 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         commandMenuVoiceController.onLevelChange = { [weak self] level in
             self?.commandMenuVoiceLevel = level
         }
+        commandMenuVoiceController.onPartialTranscript = { [weak self] partial in
+            guard let self, self.commandMenuPanel?.isVisible == true else { return }
+            self.replaceVoiceText(partial)
+        }
         commandMenuVoiceController.onTranscript = { [weak self] transcript in
             guard let self, self.commandMenuPanel?.isVisible == true else { return }
-            self.launchTaskFromCommandMenu(query: transcript)
+            self.replaceVoiceText(transcript)
         }
+    }
+
+    /// Replace the voice-dictated region with the latest (cumulative) transcript.
+    private func replaceVoiceText(_ text: String) {
+        commandMenuQuery = voicePrefix + voiceSeparator + text + voiceSuffix
     }
 
     private func syncCommandMenuVoice(with modifierFlags: NSEvent.ModifierFlags, invokeKeyDown: Bool) {
@@ -1884,6 +1900,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
 
         switch commandMenuVoiceState {
         case .idle:
+            // Snapshot the current text around the insertion point (end of text)
+            let query = commandMenuQuery
+            voicePrefix = query
+            voiceSuffix = ""
+            voiceSeparator = voicePrefix.isEmpty || voicePrefix.hasSuffix(" ") || voicePrefix.hasSuffix("\n") ? "" : " "
             commandMenuVoiceController.start()
         case .listening, .transcribing, .failed:
             break

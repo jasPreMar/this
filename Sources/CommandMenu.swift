@@ -949,7 +949,6 @@ struct CommandMenuView: View {
             textHeight: $textHeight,
             placeholder: activeChatRecord != nil ? "Message this task..." : "Ask Claude Code anything…",
             voiceState: appDelegate.commandMenuVoiceState,
-            voiceLevel: appDelegate.commandMenuVoiceLevel,
             isStreaming: activeChatRecord?.isRunning == true,
             onSubmit: submitInput,
             onStop: stopActiveTask,
@@ -1674,7 +1673,6 @@ private struct CommandMenuTextInputRow: View {
     @Binding var textHeight: CGFloat
     let placeholder: String
     let voiceState: SearchViewModel.VoiceState
-    let voiceLevel: CGFloat
     let isStreaming: Bool
     let onSubmit: () -> Void
     let onStop: () -> Void
@@ -1687,7 +1685,7 @@ private struct CommandMenuTextInputRow: View {
     }
 
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(alignment: .bottom, spacing: 12) {
             ZStack(alignment: .leading) {
                 Text(placeholder)
                     .font(.system(size: 14))
@@ -1707,11 +1705,6 @@ private struct CommandMenuTextInputRow: View {
                 .frame(height: max(textHeight, 22))
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
-
-            VoiceTrailingIndicator(
-                state: voiceState,
-                level: voiceLevel
-            )
 
             CommandMenuInputActionButton(
                 hasText: hasText,
@@ -1736,8 +1729,6 @@ private struct CommandMenuInputActionButton: View {
     let onStop: () -> Void
     let onVoice: () -> Void
 
-    @State private var isHovering = false
-
     private var isVoiceActive: Bool {
         switch voiceState {
         case .listening, .transcribing:
@@ -1748,32 +1739,46 @@ private struct CommandMenuInputActionButton: View {
     }
 
     var body: some View {
-        Group {
+        HStack(spacing: 4) {
             if isStreaming {
-                actionButton(
+                SingleActionButton(
                     icon: "stop.fill",
                     action: onStop,
                     accessibilityLabel: "Stop"
                 )
-            } else if hasText {
-                actionButton(
-                    icon: "arrow.up",
-                    action: onSubmit,
-                    accessibilityLabel: "Send"
-                )
             } else {
-                actionButton(
-                    icon: isVoiceActive ? "mic.fill" : "mic",
+                // Mic / stop-voice button — always visible
+                SingleActionButton(
+                    icon: isVoiceActive ? "stop.fill" : "mic",
                     action: onVoice,
-                    accessibilityLabel: "Voice input"
+                    accessibilityLabel: isVoiceActive ? "Stop voice input" : "Voice input"
                 )
+
+                // Send button — visible when there is text
+                if hasText {
+                    SingleActionButton(
+                        icon: "arrow.up",
+                        action: onSubmit,
+                        accessibilityLabel: "Send"
+                    )
+                    .transition(.opacity)
+                }
             }
         }
         .animation(.easeInOut(duration: 0.15), value: isStreaming)
         .animation(.easeInOut(duration: 0.15), value: hasText)
+        .animation(.easeInOut(duration: 0.15), value: isVoiceActive)
     }
+}
 
-    private func actionButton(icon: String, action: @escaping () -> Void, accessibilityLabel: String) -> some View {
+private struct SingleActionButton: View {
+    let icon: String
+    let action: () -> Void
+    let accessibilityLabel: String
+
+    @State private var isHovering = false
+
+    var body: some View {
         Button(action: action) {
             Image(systemName: icon)
                 .font(.system(size: 12, weight: .semibold))
@@ -1794,7 +1799,6 @@ private struct CommandMenuInputActionButton: View {
             updateCommandMenuHoverState(hovering, state: $isHovering)
         }
         .accessibilityLabel(accessibilityLabel)
-        .transition(.opacity)
     }
 }
 
