@@ -87,6 +87,18 @@ private struct WelcomeStep: View {
             title: "Welcome to This",
             subtitle: "\"This\" is a powerful local assistant that reads context from your Mac and helps you act on what is on screen."
         ) {
+            YouTubeThumbnailLink(videoID: "e7nriIU9bM8")
+
+            HStack(spacing: 6) {
+                Image(systemName: "link")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.secondary)
+                Link("github.com/jasPreMar/this", destination: URL(string: "https://github.com/jasPreMar/this")!)
+                    .font(.system(size: 14, weight: .medium))
+                    .onboardingClickableCursor()
+            }
+            .padding(.top, 4)
+
             SecurityNoticeCard(
                 title: "Security notice",
                 message: "The connected AI agent can trigger powerful actions on your Mac, including running commands, reading and writing files, and capturing screenshots depending on the permissions you grant.\n\nOnly enable \"This\" if you understand the risks and trust the prompts and integrations you use."
@@ -619,6 +631,59 @@ private extension View {
             } else {
                 NSCursor.pop()
             }
+        }
+    }
+}
+
+private struct YouTubeThumbnailLink: View {
+    let videoID: String
+    @State private var thumbnailImage: NSImage?
+    @State private var isHovered = false
+
+    var body: some View {
+        Button {
+            let url = URL(string: "https://www.youtube.com/watch?v=\(videoID)")!
+            NSWorkspace.shared.open(url)
+        } label: {
+            ZStack {
+                if let thumbnailImage {
+                    Image(nsImage: thumbnailImage)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 314)
+                        .clipped()
+                } else {
+                    Color.black
+                        .frame(height: 314)
+                }
+
+                Color.black.opacity(isHovered ? 0.15 : 0)
+
+                Circle()
+                    .fill(Color.red)
+                    .frame(width: 60, height: 60)
+                    .overlay(
+                        Image(systemName: "play.fill")
+                            .font(.system(size: 24))
+                            .foregroundStyle(.white)
+                            .offset(x: 2)
+                    )
+                    .shadow(color: .black.opacity(0.4), radius: 8, y: 4)
+                    .scaleEffect(isHovered ? 1.08 : 1.0)
+                    .animation(.easeInOut(duration: 0.15), value: isHovered)
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .shadow(color: Color.black.opacity(0.1), radius: 16, y: 6)
+        }
+        .buttonStyle(.plain)
+        .onboardingClickableCursor()
+        .onHover { isHovered = $0 }
+        .task {
+            guard let url = URL(string: "https://img.youtube.com/vi/\(videoID)/maxresdefault.jpg"),
+                  let (data, _) = try? await URLSession.shared.data(from: url),
+                  let image = NSImage(data: data) else { return }
+            thumbnailImage = image
         }
     }
 }

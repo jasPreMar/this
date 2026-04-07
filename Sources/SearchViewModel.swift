@@ -1164,7 +1164,7 @@ class SearchViewModel: ObservableObject {
                     return icon
                 }
             }
-            current = axValue(el, key: kAXParentAttribute) as? AXUIElement
+            current = axValue(el, key: kAXParentAttribute) as! AXUIElement?
         }
         return nil
     }
