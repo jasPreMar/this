@@ -792,6 +792,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             defer: false
         )
         window.title = "This Settings"
+        window.titlebarAppearsTransparent = true
+        window.styleMask.insert(.fullSizeContentView)
         window.collectionBehavior.insert(.fullScreenPrimary)
         window.isReleasedWhenClosed = false
         window.center()

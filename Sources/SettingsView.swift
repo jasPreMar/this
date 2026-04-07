@@ -68,7 +68,8 @@ struct SettingsView: View {
     }
 
     var body: some View {
-        NavigationSplitView {
+        HStack(spacing: 0) {
+            // Sidebar
             VStack(spacing: 0) {
                 List(SettingsSection.allCases, selection: $selectedSection) { section in
                     Label(section.title, systemImage: section.symbolName)
@@ -76,6 +77,8 @@ struct SettingsView: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .listStyle(.sidebar)
+                .scrollContentBackground(.hidden)
+                .padding(.top, 38)
 
                 Divider()
 
@@ -94,8 +97,12 @@ struct SettingsView: View {
                 }
                 .padding(12)
             }
-            .navigationSplitViewColumnWidth(min: 190, ideal: 210)
-        } detail: {
+            .frame(width: 220)
+            .background(VisualEffectView(material: .sidebar, blendingMode: .behindWindow))
+
+            Divider()
+
+            // Detail
             Group {
                 switch selectedSection ?? .general {
                 case .general:
@@ -112,6 +119,7 @@ struct SettingsView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Color(nsColor: .windowBackgroundColor))
         }
+        .ignoresSafeArea()
     }
 }
 
@@ -829,5 +837,23 @@ private struct SettingsPermissionGrantButtonStyle: ButtonStyle {
                 RoundedRectangle(cornerRadius: 9, style: .continuous)
                     .fill(Color.secondary.opacity(configuration.isPressed ? 0.16 : 0.12))
             )
+    }
+}
+
+private struct VisualEffectView: NSViewRepresentable {
+    let material: NSVisualEffectView.Material
+    let blendingMode: NSVisualEffectView.BlendingMode
+
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let view = NSVisualEffectView()
+        view.material = material
+        view.blendingMode = blendingMode
+        view.state = .active
+        return view
+    }
+
+    func updateNSView(_ nsView: NSVisualEffectView, context: Context) {
+        nsView.material = material
+        nsView.blendingMode = blendingMode
     }
 }
