@@ -271,8 +271,16 @@ struct PanelInputRow: View {
     @Binding var textHeight: CGFloat
     var expandsTextField = false
 
+    private var hasText: Bool {
+        !viewModel.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var isStreaming: Bool {
+        viewModel.claudeManager?.status.isActive ?? false
+    }
+
     var body: some View {
-        HStack(alignment: .top, spacing: 4) {
+        HStack(alignment: .bottom, spacing: 4) {
             FocusedTextField(
                 text: $viewModel.query,
                 textWidth: $textWidth,
@@ -285,28 +293,74 @@ struct PanelInputRow: View {
                     return event.type == .keyDown && event.keyCode == 12 && flags == [.command]
                 }
             )
-            .frame(width: expandsTextField ? nil : textWidth, height: textHeight)
-            .frame(maxWidth: expandsTextField ? .infinity : nil, alignment: .leading)
+            .frame(height: textHeight)
+            .frame(maxWidth: .infinity, alignment: .leading)
 
-            if let manager = viewModel.claudeManager,
-               manager.status.isActive {
-                Button(action: {
-                    manager.stop()
-                }) {
-                    Image(systemName: "stop.fill")
-                        .font(.system(size: 10))
-                        .foregroundColor(.secondary)
-                        .padding(.horizontal, 4)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .padding(.top, 3)
-                .help("Stop generation")
+            if isStreaming {
+                PanelActionButton(
+                    icon: "stop.fill",
+                    action: { viewModel.claudeManager?.stop() },
+                    accessibilityLabel: "Stop"
+                )
+            } else if hasText {
+                PanelActionButton(
+                    icon: "arrow.up",
+                    action: { viewModel.submitMessage() },
+                    accessibilityLabel: "Send"
+                )
+                .transition(.opacity)
             }
         }
+        .animation(.easeInOut(duration: 0.15), value: isStreaming)
+        .animation(.easeInOut(duration: 0.15), value: hasText)
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
+    }
+}
+
+private struct PanelActionButton: View {
+    let icon: String
+    let action: () -> Void
+    let accessibilityLabel: String
+
+    @State private var isHovering = false
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(isHovering ? Color.primary : Color.secondary)
+                .frame(width: 22, height: 20)
+                .contentShape(
+                    RoundedRectangle(cornerRadius: 4, style: .continuous)
+                )
+        }
+        .buttonStyle(PanelActionButtonStyle(isHovering: isHovering))
+        .onHover { hovering in
+            if hovering {
+                isHovering = true
+            } else {
+                withAnimation(.easeOut(duration: 0.15)) {
+                    isHovering = false
+                }
+            }
+        }
+        .accessibilityLabel(accessibilityLabel)
+    }
+}
+
+private struct PanelActionButtonStyle: ButtonStyle {
+    var isHovering: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .background(
+                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                    .fill(Color.black.opacity(
+                        configuration.isPressed ? 0.14 : (isHovering ? 0.06 : 0)
+                    ))
+            )
     }
 }
 

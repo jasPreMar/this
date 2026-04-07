@@ -43,19 +43,24 @@ private struct VoiceIndicatorButton: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: systemName)
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundColor(filled ? .white : (isHovering ? .primary : .secondary))
-                .frame(width: 22, height: 22)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(isHovering ? .primary : .secondary)
+                .frame(width: 28, height: 24)
                 .background(
-                    Circle().fill(
-                        filled
-                            ? Color.accentColor
-                            : Color.primary.opacity(isHovering ? 0.1 : 0)
-                    )
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .fill(Color.black.opacity(isHovering ? 0.06 : 0))
                 )
         }
         .buttonStyle(.plain)
-        .onHover { isHovering = $0 }
+        .onHover { hovering in
+            if hovering {
+                isHovering = true
+            } else {
+                withAnimation(.easeOut(duration: 0.1)) {
+                    isHovering = false
+                }
+            }
+        }
     }
 }
 
