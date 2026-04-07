@@ -458,7 +458,11 @@ class SearchViewModel: ObservableObject {
         AXUIElementGetPid(resolvedElement, &pid)
         if let app = NSRunningApplication(processIdentifier: pid) {
             hoveredAppPID = pid
-            hoveredContextIcon = app.icon
+            if app.bundleIdentifier == "com.apple.notificationcenterui" {
+                hoveredContextIcon = widgetIcon(for: resolvedElement) ?? desktopSnapshotIcon()
+            } else {
+                hoveredContextIcon = app.icon
+            }
         } else {
             hoveredContextIcon = nil
         }
@@ -1106,9 +1110,22 @@ class SearchViewModel: ObservableObject {
 
         let queryPoints = accessibilityQueryPoints(for: mouseLocation)
 
+        let ownPID = ProcessInfo.processInfo.processIdentifier
+
         for window in windowList {
             let alpha = window[kCGWindowAlpha as String] as? Double ?? 1
             if alpha <= 0 { continue }
+
+            // Only consider normal-layer windows (layer 0). System chrome like
+            // the Dock, menu bar, Control Center, and Notification Center live
+            // on other layers and can span the entire screen, falsely blocking
+            // desktop detection.
+            let layer = window[kCGWindowLayer as String] as? Int ?? 0
+            if layer != 0 { continue }
+
+            // Skip our own windows so the panel doesn't block desktop detection
+            let pid = window[kCGWindowOwnerPID as String] as? Int32 ?? 0
+            if pid == ownPID { continue }
 
             var bounds = CGRect.zero
             guard let boundsDictionary = window[kCGWindowBounds as String] as? NSDictionary,
@@ -1126,7 +1143,36 @@ class SearchViewModel: ObservableObject {
         return true
     }
 
+    /// Try to resolve the icon for a desktop widget by walking the AX hierarchy
+    /// to find a description matching a running app name.
+    private func widgetIcon(for element: AXUIElement) -> NSImage? {
+        let runningApps = NSWorkspace.shared.runningApplications
+        var appsByName: [String: NSRunningApplication] = [:]
+        for app in runningApps {
+            if let name = app.localizedName, !name.isEmpty {
+                appsByName[name] = app
+            }
+        }
+
+        // Walk up from the element looking for a title/description that matches an app
+        var current: AXUIElement? = element
+        for _ in 0..<10 {
+            guard let el = current else { break }
+            for key in [kAXTitleAttribute, kAXDescriptionAttribute] {
+                if let text = axValue(el, key: key) as? String, !text.isEmpty,
+                   let app = appsByName[text], let icon = app.icon {
+                    return icon
+                }
+            }
+            current = axValue(el, key: kAXParentAttribute) as? AXUIElement
+        }
+        return nil
+    }
+
     private func desktopSnapshotIcon() -> NSImage {
+        if let finderURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.finder") {
+            return NSWorkspace.shared.icon(forFile: finderURL.path)
+        }
         let desktopPath = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Desktop", isDirectory: true)
             .path
